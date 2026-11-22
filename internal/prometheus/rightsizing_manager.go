@@ -2,9 +2,9 @@ package prometheus
 
 import (
 	"fmt"
-	"github.com/skyhook-io/radar/pkg/rightsizing"
 
 	"github.com/skyhook-io/radar/internal/k8s"
+	"github.com/skyhook-io/radar/pkg/rightsizing"
 	"github.com/skyhook-io/radar/pkg/subject"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -14,7 +14,7 @@ type WorkloadManager = rightsizing.WorkloadManager
 
 const addonManagerModeLabel = "addonmanager.kubernetes.io/mode"
 
-// detectWorkloadManager returns nil when no signal is present, which is not
+// DetectWorkloadManager returns nil when no signal is present, which is not
 // evidence the workload is unmanaged: Argo CD's default label tracking,
 // Terraform and kubectl apply leave nothing distinguishable to read.
 func DetectWorkloadManager(obj metav1.Object) *WorkloadManager {

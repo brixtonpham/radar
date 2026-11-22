@@ -3,7 +3,6 @@ package prometheus
 import (
 	"context"
 	"fmt"
-	"github.com/skyhook-io/radar/pkg/rightsizing"
 	"log"
 	"math"
 	"sort"
@@ -14,6 +13,7 @@ import (
 	"github.com/skyhook-io/radar/internal/k8s"
 	"github.com/skyhook-io/radar/pkg/k8score"
 	"github.com/skyhook-io/radar/pkg/prom"
+	"github.com/skyhook-io/radar/pkg/rightsizing"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -1043,14 +1043,7 @@ func enrichScanHPA(ctx context.Context, cache *k8s.ResourceCache, scopes map[str
 		if workload == nil {
 			continue
 		}
-		for _, metric := range hpa.Spec.Metrics {
-			if metric.Type == autoscalingv2.ResourceMetricSourceType && metric.Resource != nil && metric.Resource.Target.AverageUtilization != nil {
-				resourceName := string(metric.Resource.Name)
-				if resourceName == "cpu" || resourceName == "memory" {
-					workload.workload.hpaManaged[resourceName] = true
-				}
-			}
-		}
+		AddHPATargetResources(workload.workload.hpaManaged, hpa, ref.Kind, ref.Name)
 	}
 }
 

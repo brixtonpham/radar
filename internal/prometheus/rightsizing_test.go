@@ -3,12 +3,12 @@ package prometheus
 import (
 	"context"
 	"errors"
-	"github.com/skyhook-io/radar/pkg/rightsizing"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/skyhook-io/radar/pkg/prom"
+	"github.com/skyhook-io/radar/pkg/rightsizing"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 )

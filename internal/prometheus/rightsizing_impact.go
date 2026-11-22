@@ -2,9 +2,10 @@ package prometheus
 
 import (
 	"fmt"
-	"github.com/skyhook-io/radar/pkg/rightsizing"
 	"math"
 	"slices"
+
+	"github.com/skyhook-io/radar/pkg/rightsizing"
 )
 
 // Class ordering and impact mirror web/src/components/rightsizing/model.ts.

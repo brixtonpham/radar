@@ -2,10 +2,11 @@ package rightsizing
 
 import (
 	"fmt"
+	"math"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	resourcehelper "k8s.io/component-helpers/resource"
-	"math"
 )
 
 type RightsizingFit string

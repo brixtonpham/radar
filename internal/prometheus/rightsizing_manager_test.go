@@ -2,12 +2,12 @@ package prometheus
 
 import (
 	"context"
-	"github.com/skyhook-io/radar/pkg/rightsizing"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/skyhook-io/radar/internal/k8s"
+	"github.com/skyhook-io/radar/pkg/rightsizing"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
