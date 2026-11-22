@@ -73,7 +73,7 @@ An embedded host may return its cluster-scoped fleet URL from
 `navSlots.fleetTakeoverHref('rightsizing', search)`. The search string comes from
 the nested router so the host can carry the current namespace selection. The
 Cost tab link and direct `/cost/rightsizing` bookmarks honor the takeover.
-Standalone Radar keeps its local scan. `RightsizingScanResponse`,
+Standalone Radar keeps its local scan. Set `navSlots.rightsizingProviderStatus` when the host advertises `fleet_rightsizing`, so embedded Metrics and Cost can tell a missing provider response from a Hub version that predates provider selection. `RightsizingScanResponse`,
 `RightsizingScanWorkload`, and `PrometheusRightsizing` are exported types for
 the existing scan and workload reads. A scan starts with an explicit POST;
 GET retrieves a retained scan and returns JSON null before the first scan.

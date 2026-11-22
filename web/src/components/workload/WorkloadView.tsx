@@ -2265,7 +2265,7 @@ function DiagnoseInlineSection({ kind, namespace, name, group, onOpenReachabilit
 // Drawer mode: single chart + category tabs (compact for ~500px width).
 // Full-screen mode: multi-chart grid so CPU + Memory + Network can be
 // compared side-by-side without tab switching.
-function MetricsTabContent({
+export function MetricsTabContent({
   kind,
   namespace,
   name,
@@ -2298,6 +2298,17 @@ function MetricsTabContent({
   if (checking) return <p role="status" className="p-4 text-sm text-theme-text-secondary">Loading workload metrics…</p>
 
   const setupHint = setup && <DatadogSetupHint owner={setup === 'owner'} />
+  if (rightsizing) {
+    return (
+      <div className={fill ? 'h-full overflow-auto' : undefined}>
+        {setupHint}
+        {expanded
+          ? <PrometheusChartsGrid {...workload} resource={resource} fill={false} showRightsizing={false} />
+          : <DrawerMetricsContent {...workload} resource={resource} />}
+        <div className="px-4 pb-4">{rightsizing}</div>
+      </div>
+    )
+  }
   if (expanded) {
     if (!fill) return <PrometheusChartsGrid kind={kind} namespace={namespace} name={name} resource={resource} fill={false} />
     return (

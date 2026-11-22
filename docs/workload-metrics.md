@@ -33,7 +33,7 @@ requires listing workloads of the corresponding kind. Its fleet inventory exclud
 the same user. Unavailable HPA evidence withholds request changes governed by
 that evidence. A rollout, partition, unready replica or a Pod from another
 revision prevents a recommendation. Pod names alone cannot establish ownership.
-When only Datadog charts are enabled, an existing Prometheus connection still supplies rightsizing. After Datadog rightsizing is approved, its errors remain visible so the source stays clear. The MCP `get_rightsizing` tool uses the cluster’s Prometheus connection.
+When only Datadog charts are enabled, an existing Prometheus connection still supplies rightsizing. Metrics and Cost use the same selected rightsizing provider. An unavailable Datadog mapping or a failed provider lookup leaves sizing unavailable until it recovers. Usage charts can still come from the connected Prometheus backend. The MCP `get_rightsizing` tool uses the cluster’s Prometheus connection.
 
 Radar Hub can also read the connected cluster’s Prometheus rightsizing scan and
 workload detail. These queries identify workloads by namespace and Kubernetes

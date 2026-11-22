@@ -99,5 +99,5 @@ it('removes cached workload evidence when a fresh read is denied', async () => {
 it('reports disabled cluster approval', async () => {
   state.fetch.mockResolvedValueOnce({ configured: false })
   await render()
-  await vi.waitFor(() => expect(host.textContent).toContain('no longer enabled'))
+  await vi.waitFor(() => expect(host.textContent).toContain('unavailable for this cluster'))
 })

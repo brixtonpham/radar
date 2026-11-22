@@ -3,7 +3,6 @@ import { DatadogRightsizingEvidence } from '@skyhook-io/k8s-ui/components/rights
 import type { DatadogSizingDetail } from '@skyhook-io/k8s-ui/types/rightsizing'
 import { fetchJSON, useRadarFeature } from '../../api/client'
 import { getApiBase } from '../../api/config'
-import { ConnectedPrometheusRightsizingPanel } from './RightsizingStrip'
 
 export function DatadogRightsizingPanel({
   kind,
@@ -28,23 +27,17 @@ export function DatadogRightsizingPanel({
   })
   if (support === 'unsupported') {
     return (
-      <>
-        <p className="mt-4 text-sm text-theme-text-secondary">
-          Upgrade this cluster’s Radar agent to see Datadog rightsizing.
-        </p>
-        <ConnectedPrometheusRightsizingPanel {...{ kind, namespace, name }} />
-      </>
+      <p className="mt-4 text-sm text-theme-text-secondary">
+        Upgrade this cluster’s Radar agent to see Datadog rightsizing.
+      </p>
     )
   }
   if (support === 'unknown') return null
   if (!query.error && query.data?.configured === false) {
     return (
-      <>
-        <p role="status" className="mt-4 text-sm text-theme-text-secondary">
-          Datadog rightsizing is no longer enabled for this cluster.
-        </p>
-        <ConnectedPrometheusRightsizingPanel {...{ kind, namespace, name }} />
-      </>
+      <p role="status" className="mt-4 text-sm text-theme-text-secondary">
+        Datadog rightsizing is unavailable for this cluster.
+      </p>
     )
   }
   return (

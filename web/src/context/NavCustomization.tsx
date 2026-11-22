@@ -12,6 +12,8 @@ export type FleetTakeoverTarget = 'issues' | 'gitops' | 'checks' | 'certs' | 'ri
 export interface NavCustomization {
   /** Radar Hub owns all chrome; Radar renders only the active view. */
   embedded?: boolean;
+  /** The host's metrics status endpoint explicitly identifies the rightsizing provider. */
+  rightsizingProviderStatus?: boolean;
   /**
    * When set, a "Compare across clusters" option is added to the Compare
    * button in resource action bars. The host returns the URL that should

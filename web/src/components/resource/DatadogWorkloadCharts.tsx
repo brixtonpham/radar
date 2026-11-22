@@ -1,6 +1,7 @@
+import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AreaChart, MetricsSummary, type TimeSeries } from '@skyhook-io/k8s-ui/components/charts'
-import { fetchJSON, usePrometheusStatus, useRadarFeature, type PrometheusTimeRange } from '../../api/client'
+import { ApiError, fetchJSON, usePrometheusStatus, useRadarFeature, type PrometheusTimeRange } from '../../api/client'
 import { getApiBase } from '../../api/config'
 import { TIME_RANGES, WORKLOAD_CATEGORIES } from './PrometheusCharts'
 import { useNavCustomization } from '../../context/NavCustomization'
@@ -19,7 +20,25 @@ const datadogCategories = [
   { key: 'throttling', label: 'CPU throttled periods', color: 'text-warning-text', chartColor: 'var(--warning-text)', fillColor: 'color-mix(in srgb, var(--warning-text) 14%, transparent)' },
 ] as const
 
+interface DatadogStatus {
+  configured: boolean
+  rightsizing?: boolean
+  rightsizingProvider?: 'datadog' | 'prometheus'
+  setup?: 'owner' | 'member'
+}
+
+type RightsizingSource = 'datadog' | 'prometheus' | 'unknown' | 'datadog_unavailable'
+
+function resolveRightsizingSource(status: DatadogStatus | undefined, error: Error | null, providerRequired: boolean): RightsizingSource {
+  if (error) return !providerRequired && error instanceof ApiError && error.unknownRoute ? 'prometheus' : 'unknown'
+  if (!status || (providerRequired && !status.rightsizingProvider)) return 'unknown'
+  if (status.rightsizingProvider === 'datadog') return status.rightsizing ? 'datadog' : 'datadog_unavailable'
+  if (status.rightsizingProvider === 'prometheus') return 'prometheus'
+  return status.configured && status.rightsizing ? 'datadog' : 'prometheus'
+}
+
 function useDatadogStatus(kind: string, namespace: string, embedded: boolean) {
+  const { rightsizingProviderStatus = false } = useNavCustomization()
   const enabled = embedded && !!namespace && ['Deployment', 'StatefulSet', 'DaemonSet'].includes(kind)
   const apiBase = getApiBase()
   const status = useQuery({
@@ -27,21 +46,35 @@ function useDatadogStatus(kind: string, namespace: string, embedded: boolean) {
     enabled,
     staleTime: 60_000,
     retry: false,
-    queryFn: ({ signal }) => fetchJSON<{ configured: boolean; rightsizing?: boolean; setup?: 'owner' | 'member' }>('/metrics/datadog/status', signal),
+    queryFn: ({ signal }) => fetchJSON<DatadogStatus>('/metrics/datadog/status', signal),
   })
-  return { status, enabled, mapped: enabled && status.data?.configured === true }
+  const source = enabled ? resolveRightsizingSource(status.data, status.error, rightsizingProviderStatus) : 'prometheus'
+  return { status, enabled, source, mapped: enabled && !status.isError && status.data?.configured === true }
+}
+
+function rightsizingOverride(workload: Workload, source: RightsizingSource, retry: () => void, error?: Error | null) {
+  if (source === 'prometheus') return null
+  if (source === 'datadog') return <DatadogRightsizingPanel key={[workload.kind, workload.namespace, workload.name].join('/')} {...workload} />
+  return <section className="mt-4 rounded-lg border border-theme-border bg-theme-surface p-3">
+    <h3 className="text-sm font-medium text-theme-text-primary">Rightsizing</h3>
+    <p role="alert" className="mt-2 text-sm text-theme-text-secondary">
+      {source === 'datadog_unavailable'
+        ? 'Datadog rightsizing is selected, but this cluster has no usable rightsizing connection.'
+        : 'Radar could not determine the rightsizing source.'} {error?.message}{' '}
+      <button type="button" className="text-accent hover:underline" onClick={retry}>Retry</button>
+    </p>
+  </section>
 }
 
 export function WorkloadCostRightsizing(workload: Workload) {
   const { embedded = false } = useNavCustomization()
-  const { status, mapped } = useDatadogStatus(workload.kind, workload.namespace, embedded)
+  const { status, source } = useDatadogStatus(workload.kind, workload.namespace, embedded)
   if (status.isLoading) return <p role="status" className="p-3 text-sm text-theme-text-secondary">Checking rightsizing source…</p>
-  if (mapped && status.data?.rightsizing) return <DatadogRightsizingPanel key={[workload.kind, workload.namespace, workload.name].join('/')} {...workload} />
-  return <RightsizingPanel {...workload} />
+  return rightsizingOverride(workload, source, () => void status.refetch(), status.error) ?? <RightsizingPanel {...workload} />
 }
 
 export function useDatadogWorkloadCharts({ kind, namespace, name }: Workload, range: PrometheusTimeRange, embedded: boolean) {
-  const { status, enabled, mapped } = useDatadogStatus(kind, namespace, embedded)
+  const { status, enabled, mapped, source } = useDatadogStatus(kind, namespace, embedded)
   const apiBase = getApiBase()
   const path = [kind, namespace, name].map(encodeURIComponent).join('/')
   const charts = useQuery<WorkloadCharts>({
@@ -51,7 +84,8 @@ export function useDatadogWorkloadCharts({ kind, namespace, name }: Workload, ra
     retry: false,
     queryFn: ({ signal }) => fetchJSON<WorkloadCharts>(`/metrics/datadog/workloads/${path}?range=${range}`, signal),
   })
-  return { charts, rightsizing: mapped && status.data?.rightsizing === true, setup: enabled && !status.isError ? status.data?.setup : undefined, checking: status.isLoading, configured: mapped && charts.data?.configured !== false }
+  const rightsizing = rightsizingOverride({ kind, namespace, name }, source, () => void status.refetch(), status.error)
+  return { charts, rightsizing, setup: enabled && !status.isError ? status.data?.setup : undefined, checking: status.isLoading, configured: mapped && charts.data?.configured !== false }
 }
 
 export function DatadogSetupHint({ owner }: { owner: boolean }) {
@@ -82,7 +116,7 @@ export function DatadogWorkloadCharts({
   error?: Error | null
   loading: boolean
   onRetry: () => void
-  rightsizing: boolean
+  rightsizing: ReactNode
   fill: boolean
 }) {
   return (
@@ -129,7 +163,7 @@ export function DatadogWorkloadCharts({
           <div className="mt-4"><RestartEventLane {...workload} range={range} /></div>
         </>
       )}
-      {rightsizing ? <DatadogRightsizingPanel key={[workload.kind, workload.namespace, workload.name].join('/')} {...workload} /> : <ConnectedPrometheusRightsizingPanel {...workload} />}
+      {rightsizing ?? <ConnectedPrometheusRightsizingPanel {...workload} />}
     </div>
   )
 }
