@@ -128,7 +128,7 @@ func TestRightsizingScopeReadHPAAsCaller(t *testing.T) {
 	client := fake.NewSimpleClientset(hpa)
 	scope := rightsizing.Scope{Kind: "Deployment", Namespace: "team", Name: "api"}
 	readSizingHPA(t.Context(), client, &scope)
-	if !scope.HPAEvidenceAvailable || !scope.HPAManaged["cpu"] || scope.HPAManaged["memory"] {
+	if !scope.HPAEvidenceAvailable || !scope.HPAManaged.Controls("api", "cpu") || scope.HPAManaged.Controls("logger", "cpu") || scope.HPAManaged.Controls("api", "memory") {
 		t.Fatalf("unexpected HPA guard: %#v", scope)
 	}
 	client.PrependReactor("list", "horizontalpodautoscalers", func(a k8stesting.Action) (bool, runtime.Object, error) {

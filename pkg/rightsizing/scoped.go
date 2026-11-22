@@ -21,10 +21,26 @@ type Scope struct {
 	Replicas             int               `json:"replicas"`
 	PodSpec              corev1.PodSpec    `json:"podSpec"`
 	Pods                 []Pod             `json:"pods"`
-	HPAManaged           map[string]bool   `json:"hpaManaged,omitempty"`
+	HPAManaged           HPATargets        `json:"hpaManaged,omitempty"`
 	HPAEvidenceAvailable bool              `json:"hpaEvidenceAvailable"`
 	CurrentOOM           map[string]bool   `json:"currentOOM,omitempty"`
 	ManagedBy            *WorkloadManager  `json:"managedBy,omitempty"`
+}
+
+// HPATargets records resource utilization targets. A bare resource applies to
+// all containers; a container/resource key applies only to that container.
+type HPATargets map[string]bool
+
+func (targets HPATargets) Add(container, resource string) {
+	if container == "" {
+		targets[resource] = true
+		return
+	}
+	targets[container+"/"+resource] = true
+}
+
+func (targets HPATargets) Controls(container, resource string) bool {
+	return targets[resource] || targets[container+"/"+resource]
 }
 
 type Pod struct {
@@ -48,7 +64,7 @@ func Evaluate(scope Scope, evidence map[string]ContainerEvidence) []Row {
 	appendContainer := func(c corev1.Container) {
 		e := evidence[c.Name]
 		for _, key := range []string{"cpu", "memory"} {
-			row := Row{Container: c.Name, Resource: key, Fit: FitInsufficientHistory, Confidence: ConfidenceLow, ExpectedSamples: 7 * 24 * 12, HPAManaged: scope.HPAManaged[key], HPAEvidenceAvailable: scope.HPAEvidenceAvailable}
+			row := Row{Container: c.Name, Resource: key, Fit: FitInsufficientHistory, Confidence: ConfidenceLow, ExpectedSamples: 7 * 24 * 12, HPAManaged: scope.HPAManaged.Controls(c.Name, key), HPAEvidenceAvailable: scope.HPAEvidenceAvailable}
 			res := corev1.ResourceName(key)
 			req, hasReq := c.Resources.Requests[res]
 			lim, hasLimit := c.Resources.Limits[res]

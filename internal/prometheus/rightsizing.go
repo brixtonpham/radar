@@ -392,21 +392,23 @@ func loadHPAManagedResources(ctx context.Context, cache *k8s.ResourceCache, kind
 	return managed, true
 }
 
-func AddHPATargetResources(managed map[string]bool, hpa *autoscalingv2.HorizontalPodAutoscaler, kind, name string) {
+func AddHPATargetResources(managed rightsizing.HPATargets, hpa *autoscalingv2.HorizontalPodAutoscaler, kind, name string) {
 	ref := hpa.Spec.ScaleTargetRef
 	if !strings.EqualFold(ref.Kind, kind) || ref.Name != name {
 		return
 	}
 	for _, metric := range hpa.Spec.Metrics {
 		var resourceName corev1.ResourceName
+		var container string
 		switch {
 		case metric.Type == autoscalingv2.ResourceMetricSourceType && metric.Resource != nil && metric.Resource.Target.AverageUtilization != nil:
 			resourceName = metric.Resource.Name
 		case metric.Type == autoscalingv2.ContainerResourceMetricSourceType && metric.ContainerResource != nil && metric.ContainerResource.Target.AverageUtilization != nil:
 			resourceName = metric.ContainerResource.Name
+			container = metric.ContainerResource.Container
 		}
 		if resourceName == corev1.ResourceCPU || resourceName == corev1.ResourceMemory {
-			managed[string(resourceName)] = true
+			managed.Add(container, string(resourceName))
 		}
 	}
 }
@@ -673,7 +675,7 @@ func terminationEvidenceByContainer(result *prom.QueryResult) map[string]termina
 
 func buildRightsizingRow(container containerSpec, resourceName string, expected int, ownerCoverage OwnerCoverage, workload rightsizingWorkload, results map[string]queryOutcome) (row RightsizingRow) {
 	defer rightsizing.MarkPodLevelRequest(&row)
-	row = RightsizingRow{Container: container.name, Resource: resourceName, Fit: FitInsufficientHistory, Confidence: ConfidenceLow, ExpectedSamples: expected, HPAManaged: workload.hpaManaged[resourceName], HPAEvidenceAvailable: workload.hpaAvailable, LiveInventoryUnavailable: workload.liveInventoryUnavailable}
+	row = RightsizingRow{Container: container.name, Resource: resourceName, Fit: FitInsufficientHistory, Confidence: ConfidenceLow, ExpectedSamples: expected, HPAManaged: rightsizing.HPATargets(workload.hpaManaged).Controls(container.name, resourceName), HPAEvidenceAvailable: workload.hpaAvailable, LiveInventoryUnavailable: workload.liveInventoryUnavailable}
 	var req, lim *resource.Quantity
 	statistic := "P95"
 	if resourceName == "cpu" {

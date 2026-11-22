@@ -686,7 +686,7 @@ func buildScanRow(container containerSpec, resourceName string, key scanKey, exp
 	defer rightsizing.MarkPodLevelRequest(&row)
 	row = RightsizingRow{
 		Container: container.name, Resource: resourceName, Fit: FitInsufficientHistory, Confidence: ConfidenceLow,
-		ExpectedSamples: expected, HPAManaged: workload.hpaManaged[resourceName], HPAEvidenceAvailable: workload.hpaAvailable,
+		ExpectedSamples: expected, HPAManaged: rightsizing.HPATargets(workload.hpaManaged).Controls(container.name, resourceName), HPAEvidenceAvailable: workload.hpaAvailable,
 		LiveInventoryUnavailable: workload.liveInventoryUnavailable,
 	}
 	var request, limit = container.cpuReq, container.cpuLim
