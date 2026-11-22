@@ -31,7 +31,7 @@ identity and recommendations again.
 Radar Hub asks the connected agent for the workload as the signed-in user.
 Access requires a named workload GET and permission to list Pods, plus ReplicaSets
 for Deployments or ControllerRevisions for DaemonSets. Fleet discovery additionally
-requires listing workloads of the corresponding kind. The agent reads HPAs as
+requires listing workloads of the corresponding kind. Its fleet inventory excludes controllers confirmed at zero desired replicas. The agent reads HPAs as
 the same user. Unavailable HPA evidence withholds request changes governed by
 that evidence. A rollout, partition, unready replica or a Pod from another
 revision prevents a recommendation. Pod names alone cannot establish ownership.

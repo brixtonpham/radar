@@ -14,6 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/dynamic"
@@ -140,6 +141,9 @@ func readSizingInventory(ctx context.Context, client dynamic.Interface, caller k
 						out.Partial = true
 						continue
 					}
+					if sizingScaledToZero(wk.Kind, obj) {
+						continue
+					}
 					if !broadGet {
 						if _, err := res.Get(ctx, obj.GetName(), metav1.GetOptions{}); err != nil {
 							out.Partial = out.Partial || !(apierrors.IsForbidden(err) || apierrors.IsNotFound(err))
@@ -160,4 +164,14 @@ func readSizingInventory(ctx context.Context, client dynamic.Interface, caller k
 		}
 	}
 	return out
+}
+
+func sizingScaledToZero(kind string, obj *unstructured.Unstructured) bool {
+	if kind == "DaemonSet" {
+		observed, _, _ := unstructured.NestedInt64(obj.Object, "status", "observedGeneration")
+		desired, found, err := unstructured.NestedInt64(obj.Object, "status", "desiredNumberScheduled")
+		return obj.GetGeneration() > 0 && observed == obj.GetGeneration() && found && err == nil && desired == 0
+	}
+	n, found, err := unstructured.NestedInt64(obj.Object, "spec", "replicas")
+	return found && err == nil && n == 0
 }

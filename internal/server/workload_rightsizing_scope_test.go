@@ -56,7 +56,7 @@ func TestSizingInventoryExactReads(t *testing.T) {
 		t.Fatal(err)
 	}
 	meta := metav1.ObjectMeta{Name: "hidden", Namespace: "team"}
-	client := dynamicfake.NewSimpleDynamicClient(scheme, &appsv1.Deployment{ObjectMeta: meta}, &appsv1.StatefulSet{ObjectMeta: meta}, &appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "ok", Namespace: "team"}})
+	client := dynamicfake.NewSimpleDynamicClient(scheme, &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Namespace: "team", Name: "idle"}, Spec: appsv1.StatefulSetSpec{Replicas: ptr.To[int32](0)}}, &appsv1.Deployment{ObjectMeta: meta}, &appsv1.StatefulSet{ObjectMeta: meta}, &appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "ok", Namespace: "team"}})
 	deny := func(a k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewForbidden(a.GetResource().GroupResource(), "", nil)
 	}
@@ -65,6 +65,14 @@ func TestSizingInventoryExactReads(t *testing.T) {
 	got := readSizingInventory(t.Context(), client, fake.NewSimpleClientset(), []string{"team"})
 	if got.Partial || len(got.Items) != 1 || got.Items[0].Name != "ok" {
 		t.Fatal(got)
+	}
+	if slices.ContainsFunc(client.Actions(), func(a k8stesting.Action) bool {
+		if get, ok := a.(k8stesting.GetAction); ok && a.GetVerb() == "get" {
+			return get.GetName() == "idle"
+		}
+		return false
+	}) {
+		t.Fatal("scaled-to-zero workload used a named lookup")
 	}
 	// An exact self-review avoids per-object GETs for a namespace-wide reader.
 	broad := fake.NewSimpleClientset()
