@@ -4040,6 +4040,7 @@ export interface RightsizingScanWorkload {
   name: string;
   replicas: number;
   scaledToZero: boolean;
+  managedBy?: WorkloadRightsizingEvidence["managedBy"];
   rows: RightsizingRow[];
 }
 
@@ -4351,9 +4352,10 @@ export function usePrometheusRightsizing(
   enabled = true,
 ) {
   return useQuery<PrometheusRightsizing>({
-    queryKey: ["prometheus-rightsizing", kind, namespace, name],
-    queryFn: () =>
-      fetchJSON(`/prometheus/rightsizing/${kind}/${namespace}/${name}`),
+    queryKey: ["prometheus-rightsizing", getApiBase(), kind, namespace, name],
+    queryFn: ({ signal }) =>
+      fetchJSON(`/prometheus/rightsizing/${kind}/${namespace}/${name}`, signal),
+    retry: (count, error) => !isForbiddenError(error) && count < 1,
     enabled: enabled && Boolean(kind && namespace && name),
     staleTime: 5 * 60 * 1000,
     refetchInterval: 10 * 60 * 1000,

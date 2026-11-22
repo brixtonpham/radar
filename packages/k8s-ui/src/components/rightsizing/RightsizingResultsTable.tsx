@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { RightsizingRow } from '../../types/rightsizing'
+import { formatRelativeAgeTime } from '../../utils/format'
 import { Badge } from '../ui/Badge'
 import { Collapse, CollapseChevron } from '../ui/Collapse'
 import { getRightsizingExplanation } from './RightsizingEvidence'
@@ -95,6 +96,12 @@ function ScanResultRow({
             {row.clusterName && `${row.clusterName} · `}
             {row.namespace} · {row.container}
           </div>
+          {row.source && (
+            <div className="text-xs text-theme-text-tertiary">
+              {row.source === 'datadog' ? 'Datadog' : 'Prometheus'}
+              {row.observedAt && <> · Evaluated <time dateTime={row.observedAt} title={new Date(row.observedAt).toLocaleString()}>{formatRelativeAgeTime(row.observedAt)}</time></>}
+            </div>
+          )}
         </div>
         <ResourceRequestCell row={row.cpu} review={row.review?.cpu} scaledToZero={row.scaledToZero} />
         <ResourceRequestCell row={row.memory} review={row.review?.memory} scaledToZero={row.scaledToZero} />
@@ -213,7 +220,7 @@ export function FitWhy({
   label: string
   row?: RightsizingRow
   review?: string
-  source?: 'datadog'
+  source?: RightsizingResultRow['source']
 }) {
   if (!row)
     return (
@@ -244,7 +251,9 @@ export function FitWhy({
         {row.queryError
           ? source === 'datadog'
             ? 'Datadog could not return these measurements. Open the workload to retry.'
-            : 'Metrics could not be queried, so usable history could not be determined. Retry the scan, or select fewer namespaces in the top bar.'
+            : source === 'prometheus'
+              ? 'Prometheus could not return these measurements. Retry the scan.'
+              : 'Metrics could not be queried, so usable history could not be determined. Retry the scan, or select fewer namespaces in the top bar.'
           : `${observation}${history}`}
       </p>
       <EvidenceNote row={row} review={review} />

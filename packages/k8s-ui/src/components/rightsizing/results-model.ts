@@ -23,7 +23,8 @@ export interface RightsizingResultRow extends Omit<ScanWorkload, 'rows'> {
   container: string
   clusterId?: string
   clusterName?: string
-  source?: 'datadog'
+  source?: 'datadog' | 'prometheus'
+  observedAt?: string
   cpu?: RightsizingRow
   memory?: RightsizingRow
   classification: ScanClass
@@ -135,10 +136,11 @@ export function groupRightsizingRows(measurements: RightsizingRow[]): Map<string
 interface Cluster {
   id: string
   name: string
+  observedAt?: string
 }
 
 export function workloadResultRows(
-  workload: DatadogSizingWorkload,
+  workload: DatadogSizingWorkload | ScanWorkload,
   cluster: Cluster,
   workloadImpact?: RightsizingResultRow['workloadImpact'],
 ): (RightsizingResultRow & { clusterId: string })[]
@@ -154,6 +156,10 @@ export function workloadResultRows(
     const id = [cluster?.id, kind, namespace, name, container].filter(Boolean).join('/')
     const result = {
       id,
+      clusterId: cluster?.id,
+      clusterName: cluster?.name,
+      observedAt: cluster?.observedAt,
+      workloadImpact: byContainer.size > 1 && index === 0 ? workloadImpact : undefined,
       kind,
       namespace,
       name,
@@ -182,17 +188,15 @@ export function workloadResultRows(
       return {
         ...result,
         source: workload.source,
-        clusterId: cluster?.id,
-        clusterName: cluster?.name,
         classification,
         impact,
         review,
         workloadReason: index === 0 ? workload.reason : undefined,
-        workloadImpact: byContainer.size > 1 && index === 0 ? workloadImpact : undefined,
       }
     }
     return {
       ...result,
+      source: cluster ? 'prometheus' : undefined,
       classification: classifyRows(rows, replicas, scaledToZero),
       impact: calculateImpact(rows, replicas),
     }

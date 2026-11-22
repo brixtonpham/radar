@@ -35,6 +35,12 @@ that evidence. A rollout, partition, unready replica or a Pod from another
 revision prevents a recommendation. Pod names alone cannot establish ownership.
 When only Datadog charts are enabled, an existing Prometheus connection still supplies rightsizing. After Datadog rightsizing is approved, its errors remain visible so the source stays clear. The MCP `get_rightsizing` tool uses the cluster’s Prometheus connection.
 
+Radar Hub can also read the connected cluster’s Prometheus rightsizing scan and
+workload detail. These queries identify workloads by namespace and Kubernetes
+owner names. They require a Prometheus data source isolated to that cluster.
+A federated endpoint that includes another cluster with the same names can
+combine their metrics.
+
 The agent returns container requests and limits without transferring literal
 environment variables, command arguments or a raw Pod template.
 

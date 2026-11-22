@@ -1,5 +1,5 @@
 import { ExternalLink, Gauge, HelpCircle } from 'lucide-react'
-import { Link, useLocation } from 'react-router-dom'
+import { RightsizingScanLink } from '../rightsizing/RightsizingScanLink'
 import {
   RightsizingEvidence,
   RightsizingEmptyState as EmptyState,
@@ -45,7 +45,6 @@ export function ConnectedPrometheusRightsizingPanel(props: RightsizingProps) {
 
 export function RightsizingPanel(props: RightsizingProps) {
   const state = useRightsizingEvidence(props)
-  const { search } = useLocation()
   if (!state.supported) return null
 
   return (
@@ -77,13 +76,12 @@ export function RightsizingPanel(props: RightsizingProps) {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          {state.data && <RightsizingContext data={state.data} />}
-          <Link
-            to={{ pathname: '/cost/rightsizing', search }}
+          {!state.error && state.data && <RightsizingContext data={state.data} />}
+          <RightsizingScanLink
             className="text-xs font-medium text-accent-text hover:underline"
           >
             Scan visible workloads
-          </Link>
+          </RightsizingScanLink>
         </div>
       </header>
       <div className="p-4">
@@ -105,7 +103,7 @@ export function RightsizingStrip(props: RightsizingProps) {
             <HelpCircle className="h-3.5 w-3.5 text-theme-text-tertiary" />
           </Tooltip>
         </div>
-        {state.data && <RightsizingContext data={state.data} compact />}
+        {!state.error && state.data && <RightsizingContext data={state.data} compact />}
       </header>
       <RightsizingBody state={state} compact />
     </section>
@@ -128,7 +126,7 @@ function RightsizingBody({
   if (state.isLoading && !state.data) {
     return <EmptyState text="Analyzing seven days of workload demand…" loading />
   }
-  if (state.error && !state.data) {
+  if (state.error) {
     const message = state.error instanceof Error ? state.error.message : String(state.error)
     return <EmptyState text={`Rightsizing unavailable — ${message}`} />
   }

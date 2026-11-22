@@ -36,6 +36,26 @@ const workload: DatadogSizingWorkload = {
 }
 
 describe('operator rightsizing results across clusters', () => {
+  it('preserves scanned workload identity, source, time and fleet impact for Prometheus', () => {
+    const { kind, namespace, name, replicas, scaledToZero } = workload
+    const rows = workloadResultRows(
+      { kind, namespace, name, replicas, scaledToZero, rows: [cpu, { ...cpu, container: 'proxy' }] },
+      { id: 'west', name: 'West', observedAt: '2026-09-01T12:34:00Z' },
+      { cpuChange: -3.2, memoryChange: 0 },
+    )
+    expect(rows[0].id).toBe('west/Deployment/payments/checkout/app')
+    expect(rows[0].source).toBe('prometheus')
+    expect(rows[1].workloadImpact).toBeUndefined()
+    const html = renderToStaticMarkup(
+      <RightsizingResultsTable rows={rows} openRowId={rows[0].id} onOpenRowChange={() => {}}
+        renderWorkloadLink={() => null} />,
+    )
+    expect(html).toContain('Prometheus')
+    expect(html).toContain('2026-09-01T12:34:00Z')
+    expect(html).toContain('Whole workload · −3.2 CPU requested')
+    expect(html).not.toContain('Datadog')
+  })
+
   it('keeps cluster identity in the list, row selection and workload link', () => {
     const a = workloadResultRows(workload, { id: 'a', name: 'East (a)' })
     const b = workloadResultRows(workload, { id: 'b', name: 'East (b)' })
