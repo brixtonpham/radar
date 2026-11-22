@@ -3,6 +3,7 @@ package prometheus
 import (
 	"context"
 	"fmt"
+	"github.com/skyhook-io/radar/pkg/rightsizing"
 	"log"
 	"math"
 	"sort"
@@ -677,12 +678,12 @@ func buildScanWorkload(input scanWorkload, evidence scanBatchEvidence) Rightsizi
 			out.Rows = append(out.Rows, row)
 		}
 	}
-	withholdIncreasesAbovePodLimit(out.Rows, input.workload.podSpec)
+	rightsizing.WithholdIncreasesAbovePodLimit(out.Rows, input.workload.podSpec)
 	return out
 }
 
 func buildScanRow(container containerSpec, resourceName string, key scanKey, expected int, workload rightsizingWorkload, evidence scanBatchEvidence) (row RightsizingRow) {
-	defer markPodLevelRequest(&row)
+	defer rightsizing.MarkPodLevelRequest(&row)
 	row = RightsizingRow{
 		Container: container.name, Resource: resourceName, Fit: FitInsufficientHistory, Confidence: ConfidenceLow,
 		ExpectedSamples: expected, HPAManaged: workload.hpaManaged[resourceName], HPAEvidenceAvailable: workload.hpaAvailable,
@@ -703,7 +704,7 @@ func buildScanRow(container containerSpec, resourceName string, key scanKey, exp
 			row.OOMEvidenceAvailable = termination.OOM || (restartAvailable && (restartActivity <= 0 || termination.Any))
 		}
 	}
-	setCurrentQuantities(&row, request, limit, resourceName)
+	rightsizing.SetCurrentQuantities(&row, request, limit, resourceName)
 	setPodLevelRequest(&row, podLevelRequestFor(container, resourceName), resourceName)
 	if queryErr := evidence.errors[resourceName]; queryErr != nil {
 		row.QueryError = RowUsageQueryFailed
@@ -717,13 +718,13 @@ func buildScanRow(container containerSpec, resourceName string, key scanKey, exp
 		observed = maxFinite(series)
 	} else {
 		peak := percentile(series, 0.99)
-		row.Peak = &ObservedStatistic{Name: "P99", Value: peak, Formatted: formatObservedValue(peak, resourceName)}
-		row.Bursty = isBurstyCPU(observed, peak)
+		row.Peak = &ObservedStatistic{Name: "P99", Value: peak, Formatted: rightsizing.FormatObservedValue(peak, resourceName)}
+		row.Bursty = rightsizing.IsBurstyCPU(observed, peak)
 	}
-	row.Observed = &ObservedStatistic{Name: statistic, Value: observed, Formatted: formatObservedValue(observed, resourceName)}
+	row.Observed = &ObservedStatistic{Name: statistic, Value: observed, Formatted: rightsizing.FormatObservedValue(observed, resourceName)}
 	row.SampleCount = len(series)
 	row.Coverage = math.Min(float64(row.SampleCount)/float64(expected), 1)
-	row.Confidence = confidenceFor(row.SampleCount, row.Coverage, OwnerCoverageKSMHistory)
+	row.Confidence = rightsizing.ConfidenceFor(row.SampleCount, row.Coverage, OwnerCoverageKSMHistory)
 	if resourceName == "cpu" && evidence.errors["throttle"] == nil {
 		if values := evidence.throttle[key]; len(values) > 0 {
 			value := maxFinite(values)
@@ -731,11 +732,11 @@ func buildScanRow(container containerSpec, resourceName string, key scanKey, exp
 			row.ThrottleRatio = &value
 		}
 	}
-	if row.SampleCount < rightsizingMinSamples {
+	if row.SampleCount < rightsizing.RightsizingMinSamples {
 		row.RecommendationReason = "insufficient_history"
 		return row
 	}
-	classifyRightsizingFit(&row, observed, request, limit, resourceName)
+	rightsizing.ClassifyRightsizingFit(&row, observed, request, limit, resourceName)
 	return row
 }
 
@@ -890,7 +891,7 @@ func snapshotScanWorkloads(ctx context.Context, cache *k8s.ResourceCache, scopes
 		key := workloadIdentity(kind, obj.GetNamespace(), obj.GetName())
 		workloads[key] = &scanWorkload{kind: kind, namespace: obj.GetNamespace(), name: obj.GetName(), replicas: replicas, workload: rightsizingWorkload{
 			podSpec: podSpec, containers: extractRuntimeContainers(podSpec), currentPodOOM: map[string]bool{}, hpaManaged: map[string]bool{}, scaledToZero: scaledToZero,
-			managedBy: detectWorkloadManager(obj),
+			managedBy: DetectWorkloadManager(obj),
 		}}
 	}
 

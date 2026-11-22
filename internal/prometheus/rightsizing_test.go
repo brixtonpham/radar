@@ -3,6 +3,7 @@ package prometheus
 import (
 	"context"
 	"errors"
+	"github.com/skyhook-io/radar/pkg/rightsizing"
 	"strings"
 	"sync"
 	"testing"
@@ -79,7 +80,7 @@ func TestClassifyRightsizingFit(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			row := RightsizingRow{HPAManaged: tc.hpa, HPAEvidenceAvailable: true, CurrentPodOOM: tc.oom, OOMEvidenceAvailable: true}
-			classifyRightsizingFit(&row, tc.observed, tc.req, tc.lim, tc.resource)
+			rightsizing.ClassifyRightsizingFit(&row, tc.observed, tc.req, tc.lim, tc.resource)
 			if row.Fit != tc.wantFit {
 				t.Errorf("fit = %s, want %s", row.Fit, tc.wantFit)
 			}
@@ -117,9 +118,9 @@ func TestCalculatedRequestUsesPracticalScaleAwareSteps(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := calculatedRequest(tc.observed, tc.resKind)
+			got := rightsizing.CalculatedRequest(tc.observed, tc.resKind)
 			if got != tc.want {
-				t.Errorf("calculatedRequest(%g, %q) = %q, want %q", tc.observed, tc.resKind, got, tc.want)
+				t.Errorf("rightsizing.CalculatedRequest(%g, %q) = %q, want %q", tc.observed, tc.resKind, got, tc.want)
 			}
 		})
 	}
@@ -145,22 +146,22 @@ func TestRecommendRequestStagesLargeReductions(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, limited := recommendRequest(tc.observed, tc.current, tc.resourceName, tc.conservative)
+			got, limited := rightsizing.RecommendRequest(tc.observed, tc.current, tc.resourceName, tc.conservative)
 			if got != tc.want || limited != tc.wantLimited {
-				t.Errorf("recommendRequest() = %q, %t; want %q, %t", got, limited, tc.want, tc.wantLimited)
+				t.Errorf("rightsizing.RecommendRequest() = %q, %t; want %q, %t", got, limited, tc.want, tc.wantLimited)
 			}
 		})
 	}
 }
 
 func TestIsBurstyCPURequiresMaterialAbsoluteAndRelativeGap(t *testing.T) {
-	if !isBurstyCPU(0.02, 0.20) {
+	if !rightsizing.IsBurstyCPU(0.02, 0.20) {
 		t.Fatal("expected a material P95-to-P99 jump to be bursty")
 	}
-	if isBurstyCPU(0.10, 0.20) {
+	if rightsizing.IsBurstyCPU(0.10, 0.20) {
 		t.Fatal("a two-fold jump must not be marked bursty")
 	}
-	if isBurstyCPU(0.001, 0.010) {
+	if rightsizing.IsBurstyCPU(0.001, 0.010) {
 		t.Fatal("a tiny absolute jump must not be marked bursty")
 	}
 }
@@ -303,10 +304,10 @@ func TestWorkloadSelectionFallsBackToExactCurrentPods(t *testing.T) {
 	if strings.Contains(selection.podPattern, "api-worker") || strings.Contains(selection.podPattern, `api-.*`) {
 		t.Errorf("selection can collide with sibling workloads: %+v", selection)
 	}
-	if got := confidenceFor(2016, 1, coverage); got != ConfidenceMedium {
+	if got := rightsizing.ConfidenceFor(2016, 1, coverage); got != ConfidenceMedium {
 		t.Errorf("current-pod confidence = %q, want medium", got)
 	}
-	if got := confidenceFor(72, 72.0/2016.0, coverage); got != ConfidenceLow {
+	if got := rightsizing.ConfidenceFor(72, 72.0/2016.0, coverage); got != ConfidenceLow {
 		t.Errorf("sparse current-pod confidence = %q, want low", got)
 	}
 	for key, query := range buildRightsizingQueries("prod", selection) {
@@ -428,19 +429,19 @@ func TestFormatRightsizingValue(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.want, func(t *testing.T) {
-			got := formatRightsizingValue(tc.v, tc.resKind)
+			got := rightsizing.FormatRightsizingValue(tc.v, tc.resKind)
 			if got != tc.want {
-				t.Errorf("formatRightsizingValue(%g, %q) = %q, want %q", tc.v, tc.resKind, got, tc.want)
+				t.Errorf("rightsizing.FormatRightsizingValue(%g, %q) = %q, want %q", tc.v, tc.resKind, got, tc.want)
 			}
 		})
 	}
 }
 
 func TestFormatObservedValueDoesNotRoundLikeARecommendation(t *testing.T) {
-	if got := formatObservedValue(0.0022, "cpu"); got != "2m" {
+	if got := rightsizing.FormatObservedValue(0.0022, "cpu"); got != "2m" {
 		t.Errorf("CPU observed = %q, want 2m", got)
 	}
-	if got := formatObservedValue(39.4*1024*1024, "memory"); got != "39Mi" {
+	if got := rightsizing.FormatObservedValue(39.4*1024*1024, "memory"); got != "39Mi" {
 		t.Errorf("memory observed = %q, want 39Mi", got)
 	}
 }
