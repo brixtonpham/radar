@@ -62,7 +62,11 @@ export function DatadogRightsizingPanel({ kind, namespace, name }: { kind: strin
     return <><p className="mt-4 text-sm text-theme-text-secondary">Upgrade this cluster’s Radar agent to see Datadog rightsizing.</p>
       <ConnectedPrometheusRightsizingPanel {...{ kind, namespace, name }} /></>
   }
-  if (support === 'unknown' || (!query.error && detail?.configured === false)) return null
+  if (support === 'unknown') return null
+  if (!query.error && detail?.configured === false) {
+    return <><p role="status" className="mt-4 text-sm text-theme-text-secondary">Datadog rightsizing is no longer enabled for this cluster.</p>
+      <ConnectedPrometheusRightsizingPanel {...{ kind, namespace, name }} /></>
+  }
   return (
     <section className="mt-4 rounded-lg border border-theme-border bg-theme-surface p-3">
       <h3 className="text-sm font-medium text-theme-text-primary">Rightsizing</h3>

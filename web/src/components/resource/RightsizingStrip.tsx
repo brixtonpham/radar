@@ -129,7 +129,16 @@ function RightsizingBody({
   return <RightsizingEvidence data={state.data} compact={compact} />
 }
 
-export type RightsizingEvidenceData = Pick<PrometheusRightsizing, 'sampleAvailable' | 'rows' | 'reason' | 'scaledToZero' | 'ownerCoverage' | 'window'>
+export type RightsizingEvidenceData = Pick<PrometheusRightsizing, 'sampleAvailable' | 'rows' | 'reason' | 'scaledToZero' | 'ownerCoverage' | 'window'> & {
+  reviewReasons?: Record<string, Record<string, string[]>>
+}
+
+const reviewNotes: Record<string, string> = {
+  qos_change: 'Changing this request could move Pods out of the Guaranteed QoS class.',
+  qos_unavailable: 'Verify the current Pods’ QoS class before changing this request.',
+  hpa_evidence_unavailable: 'Verify HPA settings before changing this request.',
+  low_confidence_reduction: 'Too few measurements cover this window to recommend a reduction.',
+}
 
 export function RightsizingEvidence({ data, compact = false, actionableRequests }: { data: RightsizingEvidenceData; compact?: boolean; actionableRequests?: { container: string; resource: string }[] }) {
   if (!data.sampleAvailable || data.rows.length === 0) {
@@ -181,7 +190,7 @@ export function RightsizingEvidence({ data, compact = false, actionableRequests 
           <h4 className="mb-2 text-xs font-semibold text-theme-text-secondary">{container}</h4>
           <div className="grid gap-3 md:grid-cols-2">
             {rows.map((row) => (
-              <FitCard key={row.resource} row={row} window={data.window}
+              <FitCard key={row.resource} row={row} window={data.window} reasons={data.reviewReasons?.[row.container]?.[row.resource]}
                 manualReview={!!row.recommendedRequest && actionableRequests !== undefined && !actionableRequests.some(item => item.container === row.container && item.resource === row.resource)} />
             ))}
           </div>
@@ -191,7 +200,7 @@ export function RightsizingEvidence({ data, compact = false, actionableRequests 
   )
 }
 
-function FitCard({ row, window, manualReview }: { row: RightsizingRow; window: string; manualReview?: boolean }) {
+function FitCard({ row, window, manualReview, reasons }: { row: RightsizingRow; window: string; manualReview?: boolean; reasons?: string[] }) {
   return (
     <div className="rounded-md border border-theme-border bg-theme-base/60 p-3">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -249,6 +258,9 @@ function FitCard({ row, window, manualReview }: { row: RightsizingRow; window: s
         <Metric label={`Evidence · ${window}`} value={`${confidenceLabel(row)} · 5m samples`} />
       </div>
       <FitExplanation row={row} />
+      {manualReview && reasons?.filter(reason => reviewNotes[reason]).map(reason => (
+        <p key={reason} className="mt-1 text-xs text-theme-text-secondary">{reviewNotes[reason]}</p>
+      ))}
     </div>
   )
 }

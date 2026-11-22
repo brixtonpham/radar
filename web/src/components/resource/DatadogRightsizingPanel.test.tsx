@@ -62,3 +62,13 @@ it.each([false, true])('copies only if a fresh authorized diff matches the previ
     expect(copyText).toHaveBeenCalledWith(detail.manifestDiff)
   }
 })
+
+it('explains revoked approval and removes the diff', async () => {
+  state.fetch.mockResolvedValueOnce(detail).mockResolvedValueOnce({ configured: false })
+  await render()
+  await vi.waitFor(() => expect(host.textContent).toContain('Copy manifest diff'))
+  await act(async () => host.querySelector('button')!.click())
+  await vi.waitFor(() => expect(host.textContent).toContain('no longer enabled'))
+  expect(host.textContent).not.toContain('Copy manifest diff')
+  expect(copyText).not.toHaveBeenCalled()
+})
