@@ -17,6 +17,7 @@ import (
 	"github.com/skyhook-io/radar/internal/prometheus"
 	"github.com/skyhook-io/radar/pkg/auth"
 	"github.com/skyhook-io/radar/pkg/k8score"
+	"github.com/skyhook-io/radar/pkg/resourceid"
 	"github.com/skyhook-io/radar/pkg/rightsizing"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -232,7 +233,7 @@ func verifiedSizingPods(ctx context.Context, client kubernetes.Interface, owner 
 		var current []*appsv1.ReplicaSet
 		for i := range sets.Items {
 			rs := &sets.Items[i]
-			if !metav1.IsControlledBy(rs, owner) {
+			if !sizingControllerRef(metav1.GetControllerOf(rs), owner.GetUID(), scope.Kind, scope.Name) {
 				continue
 			}
 			setUIDs[rs.UID] = rs.Name
@@ -261,6 +262,9 @@ func verifiedSizingPods(ctx context.Context, client kubernetes.Interface, owner 
 		var records []unstructured.Unstructured
 		for i := range revisions.Items {
 			r := &revisions.Items[i]
+			if !sizingControllerRef(metav1.GetControllerOf(r), owner.GetUID(), scope.Kind, scope.Name) {
+				continue
+			}
 			// Hash resolution only needs metadata and revision, never the recorded Pod template.
 			m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&r.ObjectMeta)
 			if err != nil {
@@ -278,10 +282,10 @@ func verifiedSizingPods(ctx context.Context, client kubernetes.Interface, owner 
 			continue
 		}
 		if scope.Kind == "Deployment" {
-			if ref.Kind != "ReplicaSet" || ref.Name != setUIDs[ref.UID] {
+			if rsName, ok := setUIDs[ref.UID]; !ok || !sizingControllerRef(ref, ref.UID, "ReplicaSet", rsName) {
 				continue
 			}
-		} else if !metav1.IsControlledBy(p, owner) || ref.Name != scope.Name || ref.Kind != scope.Kind {
+		} else if !sizingControllerRef(ref, owner.GetUID(), scope.Kind, scope.Name) {
 			continue
 		}
 		if revision == "" || p.Labels[revisionLabel] != revision || p.DeletionTimestamp != nil || p.Status.Phase != corev1.PodRunning || !sizingPodMatches(p, template.Spec) {
@@ -293,6 +297,10 @@ func verifiedSizingPods(ctx context.Context, client kubernetes.Interface, owner 
 		return nil, errSizingRollout
 	}
 	return pods, nil
+}
+
+func sizingControllerRef(ref *metav1.OwnerReference, uid types.UID, kind, name string) bool {
+	return ref != nil && uid != "" && ref.UID == uid && ref.Kind == kind && ref.Name == name && resourceid.GroupFromAPIVersion(ref.APIVersion) == "apps"
 }
 
 func sizingControllerReady(owner *unstructured.Unstructured, kind string, desired int) bool {

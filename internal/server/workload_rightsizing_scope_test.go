@@ -92,6 +92,7 @@ func TestSizingTemplateAndCurrentReplicaGuards(t *testing.T) {
 		{"old image", func(_ *appsv1.StatefulSet, p *corev1.Pod) { p.Spec.Containers[0].Image = "api:v1" }},
 		{"missing container", func(_ *appsv1.StatefulSet, p *corev1.Pod) { p.Spec.Containers = nil }},
 		{"not ready", func(_ *appsv1.StatefulSet, p *corev1.Pod) { p.Status.Conditions = nil }},
+		{"different group", func(_ *appsv1.StatefulSet, p *corev1.Pod) { p.OwnerReferences[0].APIVersion = "test.example/v1" }},
 		{"different UID", func(_ *appsv1.StatefulSet, p *corev1.Pod) { p.OwnerReferences[0].UID = "recreated" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
