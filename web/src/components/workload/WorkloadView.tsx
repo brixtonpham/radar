@@ -2286,9 +2286,9 @@ function MetricsTabContent({
   const range = TIME_RANGES.find((option) => option.value === params.get('metricsRange'))?.value ?? '1h'
   const workload = { kind, namespace, name }
   const { embedded = false } = useNavCustomization()
-  const { charts, checking, configured, setup } = useDatadogWorkloadCharts(workload, range, embedded)
+  const { charts, rightsizing, checking, configured, setup } = useDatadogWorkloadCharts(workload, range, embedded)
   if (configured) {
-    return <DatadogWorkloadCharts workload={workload} charts={charts.data?.configured ? charts.data.charts : undefined}
+    return <DatadogWorkloadCharts rightsizing={rightsizing} workload={workload} charts={charts.data?.configured ? charts.data.charts : undefined}
       range={range} fill={fill} loading={charts.isLoading} error={charts.error} onRetry={() => void charts.refetch()}
       onRangeChange={(value) => setParams((current) => {
         const next = new URLSearchParams(current)

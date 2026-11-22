@@ -3,6 +3,7 @@ import { AreaChart, MetricsSummary, type TimeSeries } from '@skyhook-io/k8s-ui/c
 import { fetchJSON, usePrometheusStatus, useRadarFeature, type PrometheusTimeRange } from '../../api/client'
 import { getApiBase } from '../../api/config'
 import { TIME_RANGES, WORKLOAD_CATEGORIES } from './PrometheusCharts'
+import { DatadogRightsizingPanel } from './DatadogRightsizingPanel'
 import { RestartEventLane } from './RestartChart'
 
 type Metric = 'cpu' | 'memory'
@@ -24,7 +25,7 @@ export function useDatadogWorkloadCharts({ kind, namespace, name }: Workload, ra
     enabled,
     staleTime: 60_000,
     retry: false,
-    queryFn: ({ signal }) => fetchJSON<{ configured: boolean; setup?: 'owner' | 'member' }>('/metrics/datadog/status', signal),
+    queryFn: ({ signal }) => fetchJSON<{ configured: boolean; rightsizing?: boolean; setup?: 'owner' | 'member' }>('/metrics/datadog/status', signal),
   })
   const mapped = enabled && status.data?.configured === true
   const path = [kind, namespace, name].map(encodeURIComponent).join('/')
@@ -35,7 +36,7 @@ export function useDatadogWorkloadCharts({ kind, namespace, name }: Workload, ra
     retry: false,
     queryFn: ({ signal }) => fetchJSON<WorkloadCharts>(`/metrics/datadog/workloads/${path}?range=${range}`, signal),
   })
-  return { charts, setup: enabled && !status.isError ? status.data?.setup : undefined, checking: status.isLoading, configured: mapped && charts.data?.configured !== false }
+  return { charts, rightsizing: mapped && status.data?.rightsizing === true, setup: enabled && !status.isError ? status.data?.setup : undefined, checking: status.isLoading, configured: mapped && charts.data?.configured !== false }
 }
 
 export function DatadogSetupHint({ owner }: { owner: boolean }) {
@@ -57,7 +58,7 @@ export function DatadogSetupHint({ owner }: { owner: boolean }) {
 }
 
 export function DatadogWorkloadCharts({
-  workload, charts, range, onRangeChange, error, loading, onRetry, fill,
+  workload, charts, range, onRangeChange, error, loading, onRetry, fill, rightsizing,
 }: {
   workload: Workload
   charts?: Panels
@@ -66,6 +67,7 @@ export function DatadogWorkloadCharts({
   error?: Error | null
   loading: boolean
   onRetry: () => void
+  rightsizing: boolean
   fill: boolean
 }) {
   return (
@@ -112,6 +114,7 @@ export function DatadogWorkloadCharts({
           <div className="mt-4"><RestartEventLane {...workload} range={range} /></div>
         </>
       )}
+      {rightsizing && <DatadogRightsizingPanel key={[workload.kind, workload.namespace, workload.name].join('/')} {...workload} />}
     </div>
   )
 }

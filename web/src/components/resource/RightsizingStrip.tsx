@@ -121,12 +121,18 @@ function RightsizingBody({
     return <EmptyState text={`Rightsizing unavailable — ${message}`} />
   }
   if (!state.data) return null
-  if (!state.data.sampleAvailable || state.data.rows.length === 0) {
-    return <EmptyState text={state.data.reason ?? 'No rightsizing evidence is available.'} />
+  return <RightsizingEvidence data={state.data} compact={compact} />
+}
+
+export type RightsizingEvidenceData = Pick<PrometheusRightsizing, 'sampleAvailable' | 'rows' | 'reason' | 'scaledToZero' | 'ownerCoverage' | 'window'>
+
+export function RightsizingEvidence({ data, compact = false, actionableRequests }: { data: RightsizingEvidenceData; compact?: boolean; actionableRequests?: { container: string; resource: string }[] }) {
+  if (!data.sampleAvailable || data.rows.length === 0) {
+    return <EmptyState text={data.reason ?? 'No rightsizing evidence is available.'} />
   }
 
   const byContainer = new Map<string, RightsizingRow[]>()
-  for (const row of state.data.rows) {
+  for (const row of data.rows) {
     const rows = byContainer.get(row.container) ?? []
     rows.push(row)
     byContainer.set(row.container, rows)
@@ -151,14 +157,14 @@ function RightsizingBody({
 
   return (
     <div className="space-y-4">
-      {(state.data.scaledToZero || state.data.ownerCoverage === 'current_pods') && (
+      {(data.scaledToZero || data.ownerCoverage === 'current_pods') && (
         <div className="flex flex-wrap gap-2">
-          {state.data.scaledToZero && (
+          {data.scaledToZero && (
             <Badge severity="neutral" size="sm">
               No current replicas · showing retained evidence
             </Badge>
           )}
-          {state.data.ownerCoverage === 'current_pods' && (
+          {data.ownerCoverage === 'current_pods' && (
             <Badge severity="info" size="sm">
               Current pods only · confidence capped
             </Badge>
@@ -170,7 +176,8 @@ function RightsizingBody({
           <h4 className="mb-2 text-xs font-semibold text-theme-text-secondary">{container}</h4>
           <div className="grid gap-3 md:grid-cols-2">
             {rows.map((row) => (
-              <FitCard key={row.resource} row={row} window={state.data!.window} />
+              <FitCard key={row.resource} row={row} window={data.window}
+                manualReview={!!row.recommendedRequest && actionableRequests !== undefined && !actionableRequests.some(item => item.container === row.container && item.resource === row.resource)} />
             ))}
           </div>
         </div>
@@ -179,7 +186,7 @@ function RightsizingBody({
   )
 }
 
-function FitCard({ row, window }: { row: RightsizingRow; window: string }) {
+function FitCard({ row, window, manualReview }: { row: RightsizingRow; window: string; manualReview?: boolean }) {
   return (
     <div className="rounded-md border border-theme-border bg-theme-base/60 p-3">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -222,7 +229,7 @@ function FitCard({ row, window }: { row: RightsizingRow; window: string }) {
         <ArrowRight className="h-4 w-4 text-theme-text-quaternary" />
         <div>
           <div className="text-[10px] uppercase tracking-wide text-theme-text-quaternary">
-            Suggested next step
+            {manualReview ? 'Candidate for manual review' : 'Suggested next step'}
           </div>
           <div className="text-lg font-semibold text-theme-text-primary">
             {row.recommendedRequest ?? '—'}

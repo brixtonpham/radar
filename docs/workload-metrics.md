@@ -16,6 +16,28 @@ organization owner can open Integrations from an empty Metrics tab when a runnin
 Kubernetes UID. The connected Radar agent checks workload access and cluster
 identity for each chart read.
 
+### Datadog-backed rightsizing in Radar Hub
+
+After an organization owner enables rightsizing for a verified cluster, the
+workload’s Metrics tab can compare each container’s CPU and memory requests with
+up to seven days of Datadog usage. The chart time picker affects the usage charts
+only. Radar uses the hottest current replica in each complete five-minute bucket.
+The sizing policy, headroom and staged reductions are shared with Prometheus
+rightsizing. CPU needs both P95 and P99 evidence. Missing restart history can
+withhold a memory reduction. Recommendations with enough evidence can include
+a copyable manifest diff. Copying checks current access, workload UID, template
+identity and recommendations again.
+
+Radar Hub asks the connected agent for the workload as the signed-in user.
+Access requires a named workload GET and permission to list Pods, plus ReplicaSets
+for Deployments or ControllerRevisions for DaemonSets. Fleet discovery additionally
+requires listing workloads of the corresponding kind. The agent reads HPAs as
+the same user. Unavailable HPA evidence withholds request changes governed by
+that evidence. A rollout, partition, unready replica or a Pod from another
+revision prevents a recommendation. Pod names alone cannot establish ownership.
+The agent returns container requests and limits without transferring literal
+environment variables, command arguments or a raw Pod template.
+
 <p align="center">
   <img src="screenshots/workload-metrics-overview.png" alt="Radar workload metrics showing HTTP requests, 5xx errors and latency above CPU, memory and throttling charts" width="1100" />
   <br /><em>Demo workload with deliberate HTTP errors. Resource charts compare the workload with the highest single-Pod value at each point; each chart identifies its population.</em>
