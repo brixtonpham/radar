@@ -253,7 +253,13 @@ func TestRightsizingScopeDaemonSetRevisionWithoutPodLabels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pods, err := verifiedSizingPods(t.Context(), fake.NewSimpleClientset(revision, pod), u, s, tmpl, sel)
+	client := fake.NewSimpleClientset(revision, pod)
+	pods, err := verifiedSizingPods(t.Context(), client, u, s, tmpl, sel)
+	podLookup := client.Actions()[0].(k8stesting.ListAction)
+	if !podLookup.Matches("list", "pods") || podLookup.GetListRestrictions().Fields.String() != "status.phase!=Failed,status.phase!=Succeeded" {
+		t.Fatal("terminal candidates must be excluded before pagination", podLookup)
+	}
+
 	if err != nil || len(pods) != 1 {
 		t.Fatalf("current DaemonSet: %v, %v", pods, err)
 	}
@@ -271,5 +277,14 @@ func TestSizingInjectedSidecarWithSharedLimit(t *testing.T) {
 	actual.Spec.Resources = nil
 	if !sizingPodMatches(&actual, template) {
 		t.Fatal("injected container unnecessarily blocked per-container sizing")
+	}
+}
+
+func TestSizingInventorySingularNamespace(t *testing.T) {
+	s := &Server{}
+	r := httptest.NewRequest(http.MethodGet, "/api/agent/workload-rightsizing-inventory?namespace=team", nil)
+	got, failed := s.parseNamespacesForUserWithStatus(r)
+	if failed || !slices.Equal(got, []string{"team"}) {
+		t.Fatalf("scoped inventory input: %v failure=%t", got, failed)
 	}
 }
