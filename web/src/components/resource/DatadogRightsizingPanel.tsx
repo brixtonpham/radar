@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { copyText } from '@skyhook-io/k8s-ui/utils/clipboard'
 import { fetchJSON, useRadarFeature } from '../../api/client'
 import { getApiBase } from '../../api/config'
-import { RightsizingEvidence, type RightsizingEvidenceData } from './RightsizingStrip'
+import { ConnectedPrometheusRightsizingPanel, RightsizingEvidence, type RightsizingEvidenceData } from './RightsizingStrip'
 
 interface SizingDetail {
   configured: boolean
@@ -22,7 +22,8 @@ export function DatadogRightsizingPanel({ kind, namespace, name }: { kind: strin
     queryKey,
     enabled: support === 'supported',
     queryFn: ({ signal }) => fetchJSON<SizingDetail>(path, signal),
-    staleTime: 30_000,
+    staleTime: 2 * 60_000,
+    refetchOnWindowFocus: false,
     retry: false,
   })
   const [copying, setCopying] = useState(false)
@@ -57,12 +58,15 @@ export function DatadogRightsizingPanel({ kind, namespace, name }: { kind: strin
     }
   }
 
+  if (support === 'unsupported') {
+    return <><p className="mt-4 text-sm text-theme-text-secondary">Upgrade this cluster’s Radar agent to see Datadog rightsizing.</p>
+      <ConnectedPrometheusRightsizingPanel {...{ kind, namespace, name }} /></>
+  }
   if (support === 'unknown' || (!query.error && detail?.configured === false)) return null
   return (
     <section className="mt-4 rounded-lg border border-theme-border bg-theme-surface p-3">
       <h3 className="text-sm font-medium text-theme-text-primary">Rightsizing</h3>
-      {support === 'unsupported' ? <p className="mt-2 text-sm text-theme-text-secondary">Upgrade this cluster’s Radar agent to see Datadog rightsizing.</p>
-        : query.error ? <p role="alert" className="mt-2 text-sm text-theme-text-secondary">{query.error.message} <button type="button" className="text-accent hover:underline" onClick={() => void query.refetch()}>Retry</button></p>
+      {query.error ? <p role="alert" className="mt-2 text-sm text-theme-text-secondary">{query.error.message} <button type="button" className="text-accent hover:underline" onClick={() => void query.refetch()}>Retry</button></p>
         : !detail?.rightsizing ? <p role="status" className="mt-2 text-sm text-theme-text-secondary">Checking workload demand…</p>
         : <>
           <p className="mb-3 text-xs text-theme-text-secondary">Datadog · Seven-day lookback · Verified current replicas</p>

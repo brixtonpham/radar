@@ -33,6 +33,11 @@ function useRightsizingEvidence({ kind, namespace, name }: RightsizingProps) {
   return { connected, supported, statusLoading, ...query }
 }
 
+export function ConnectedPrometheusRightsizingPanel(props: RightsizingProps) {
+  const status = usePrometheusStatus()
+  return status.data?.connected ? <div className="mt-4"><RightsizingPanel {...props} /></div> : null
+}
+
 export function RightsizingPanel(props: RightsizingProps) {
   const state = useRightsizingEvidence(props)
   const { search } = useLocation()
@@ -45,7 +50,7 @@ export function RightsizingPanel(props: RightsizingProps) {
           <Gauge className="mt-0.5 h-4 w-4 text-theme-text-tertiary" />
           <div>
             <div className="flex items-center gap-1.5">
-              <h3 className="text-sm font-semibold text-theme-text-primary">Rightsizing</h3>
+              <h3 className="text-sm font-semibold text-theme-text-primary">Rightsizing · Prometheus</h3>
               <Tooltip content={RIGHTSIZING_METHODOLOGY}>
                 <HelpCircle className="h-3.5 w-3.5 text-theme-text-tertiary" />
               </Tooltip>
@@ -88,7 +93,7 @@ export function RightsizingStrip(props: RightsizingProps) {
     <section className="mb-3 rounded-lg border border-theme-border bg-theme-surface/40 p-3">
       <header className="mb-2 flex items-center justify-between gap-3">
         <div className="flex items-center gap-1.5">
-          <h3 className="text-sm font-medium text-theme-text-primary">Rightsizing</h3>
+          <h3 className="text-sm font-medium text-theme-text-primary">Rightsizing · Prometheus</h3>
           <Tooltip content={RIGHTSIZING_METHODOLOGY}>
             <HelpCircle className="h-3.5 w-3.5 text-theme-text-tertiary" />
           </Tooltip>
@@ -333,7 +338,7 @@ export function getRightsizingExplanation(row: RightsizingRow): string | undefin
     insufficient_history: 'At least six hours of samples are required before suggesting a request.',
     hpa_managed: `The HPA manages ${row.resource}; review its target before changing this request.`,
     hpa_evidence_unavailable:
-      'Radar could not verify HPA ownership, so it withheld a suggested request.',
+      'Radar could not verify HPA ownership. Check permission to list HorizontalPodAutoscalers in this namespace.',
     oom_evidence: 'A lower memory request is withheld because OOM evidence exists.',
     oom_evidence_unavailable:
       'Radar could not verify recent OOM history, so it withheld a lower memory request.',

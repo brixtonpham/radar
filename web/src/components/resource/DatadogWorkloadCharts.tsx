@@ -3,6 +3,7 @@ import { AreaChart, MetricsSummary, type TimeSeries } from '@skyhook-io/k8s-ui/c
 import { fetchJSON, usePrometheusStatus, useRadarFeature, type PrometheusTimeRange } from '../../api/client'
 import { getApiBase } from '../../api/config'
 import { TIME_RANGES, WORKLOAD_CATEGORIES } from './PrometheusCharts'
+import { ConnectedPrometheusRightsizingPanel } from './RightsizingStrip'
 import { DatadogRightsizingPanel } from './DatadogRightsizingPanel'
 import { RestartEventLane } from './RestartChart'
 
@@ -114,7 +115,7 @@ export function DatadogWorkloadCharts({
           <div className="mt-4"><RestartEventLane {...workload} range={range} /></div>
         </>
       )}
-      {rightsizing && <DatadogRightsizingPanel key={[workload.kind, workload.namespace, workload.name].join('/')} {...workload} />}
+      {rightsizing ? <DatadogRightsizingPanel key={[workload.kind, workload.namespace, workload.name].join('/')} {...workload} /> : <ConnectedPrometheusRightsizingPanel {...workload} />}
     </div>
   )
 }

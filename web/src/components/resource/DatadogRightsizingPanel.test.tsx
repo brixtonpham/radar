@@ -9,6 +9,7 @@ import { DatadogRightsizingPanel } from './DatadogRightsizingPanel'
 const state = vi.hoisted(() => ({ fetch: vi.fn(), support: 'supported' }))
 vi.mock('../../api/client', () => ({
   fetchJSON: (...args: unknown[]) => state.fetch(...args),
+  usePrometheusStatus: () => ({ data: { connected: false } }),
   useRadarFeature: () => ({ support: state.support }),
 }))
 vi.mock('@skyhook-io/k8s-ui/utils/clipboard', () => ({ copyText: vi.fn(async () => true) }))

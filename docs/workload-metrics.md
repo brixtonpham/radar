@@ -25,7 +25,7 @@ only. Radar uses the hottest current replica in each complete five-minute bucket
 The sizing policy, headroom and staged reductions are shared with Prometheus
 rightsizing. CPU needs both P95 and P99 evidence. Missing restart history can
 withhold a memory reduction. Recommendations with enough evidence can include
-a copyable manifest diff. Copying checks current access, workload UID, template
+a copyable manifest diff. Low-confidence reductions remain candidates for manual review and are excluded from that diff and fleet totals. Copying checks current access, workload UID, template
 identity and recommendations again.
 
 Radar Hub asks the connected agent for the workload as the signed-in user.
@@ -35,6 +35,8 @@ requires listing workloads of the corresponding kind. The agent reads HPAs as
 the same user. Unavailable HPA evidence withholds request changes governed by
 that evidence. A rollout, partition, unready replica or a Pod from another
 revision prevents a recommendation. Pod names alone cannot establish ownership.
+When only Datadog charts are enabled, an existing Prometheus connection still supplies rightsizing. After Datadog rightsizing is approved, its errors remain visible so the source stays clear. The MCP `get_rightsizing` tool uses the cluster’s Prometheus connection.
+
 The agent returns container requests and limits without transferring literal
 environment variables, command arguments or a raw Pod template.
 
