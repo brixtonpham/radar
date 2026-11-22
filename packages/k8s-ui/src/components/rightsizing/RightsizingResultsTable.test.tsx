@@ -36,6 +36,57 @@ const workload: DatadogSizingWorkload = {
 }
 
 describe('operator rightsizing results across clusters', () => {
+  it.each([
+    { resource: 'cpu', current: 0.3, target: 0.276, expected: 'in_range' },
+    { resource: 'cpu', current: 0.3, target: 0.275, expected: 'reduction' },
+    { resource: 'cpu', current: 0.3, target: 0.274, expected: 'reduction' },
+    { resource: 'memory', current: 128 * 1024 ** 2, target: 97 * 1024 ** 2, expected: 'in_range' },
+    { resource: 'memory', current: 128 * 1024 ** 2, target: 96 * 1024 ** 2, expected: 'reduction' },
+    { resource: 'memory', current: 128 * 1024 ** 2, target: 95 * 1024 ** 2, expected: 'reduction' },
+    { resource: 'cpu', current: 0.3, target: 0.301, expected: 'increase' },
+  ] as const)('classifies $resource $current → $target across two replicas as $expected for both sources', ({
+    resource, current, target, expected,
+  }) => {
+    const row: RightsizingRow = {
+      ...cpu, resource, currentRequestValue: current, recommendedRequestValue: target,
+      fit: target > current ? 'under_requested' : 'oversized',
+      currentRequest: resource === 'cpu' ? `${Math.round(current * 1000)}m` : `${current / 1024 ** 2}Mi`,
+      recommendedRequest: resource === 'cpu' ? `${Math.round(target * 1000)}m` : `${target / 1024 ** 2}Mi`,
+    }
+    const cluster = { id: 'east', name: 'East' }
+    const { kind, namespace, name, replicas, scaledToZero } = workload
+    const prometheus = workloadResultRows({ kind, namespace, name, replicas, scaledToZero, rows: [row] }, cluster)
+    const datadog = workloadResultRows({
+      ...workload, rows: [row], actionableRequests: [{ container: row.container, resource }],
+    }, cluster)
+    for (const rows of [prometheus, datadog]) {
+      expect(rows[0].classification).toBe(expected)
+      if (expected === 'in_range') {
+        const html = renderToStaticMarkup(<RightsizingResultsTable rows={rows} openRowId={null}
+          onOpenRowChange={() => {}} renderWorkloadLink={() => null} />)
+        expect(html).toContain('Below action threshold')
+      }
+    }
+  })
+
+  it('keeps a container in manual review when the other resource qualifies for a reduction', () => {
+    const memory: RightsizingRow = {
+      ...cpu, resource: 'memory', currentRequest: '128Mi', currentRequestValue: 128 * 1024 ** 2,
+      recommendedRequest: '64Mi', recommendedRequestValue: 64 * 1024 ** 2, hpaManaged: true,
+    }
+    const rows = [cpu, memory]
+    const cluster = { id: 'east', name: 'East' }
+    const { kind, namespace, name, replicas, scaledToZero } = workload
+    const prometheus = workloadResultRows({ kind, namespace, name, replicas, scaledToZero, rows }, cluster)
+    const datadog = workloadResultRows({
+      ...workload, rows, actionableRequests: [{ container: 'app', resource: 'cpu' }],
+      reviewReasons: { app: { memory: ['hpa_managed'] } },
+    }, cluster)
+    expect(prometheus[0].classification).toBe('review')
+    expect(datadog[0].classification).toBe('review')
+    expect(datadog[0].impact).toEqual(prometheus[0].impact)
+  })
+
   it('preserves scanned workload identity, source, time and fleet impact for Prometheus', () => {
     const { kind, namespace, name, replicas, scaledToZero } = workload
     const rows = workloadResultRows(

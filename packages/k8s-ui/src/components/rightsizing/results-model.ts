@@ -42,8 +42,15 @@ const CLASS_RANK: Record<ScanClass, number> = {
   in_range: 5,
 }
 
-const MIN_CPU_REDUCTION = 0.05
+const MIN_CPU_REDUCTION_MILLI = 50
 const MIN_MEMORY_REDUCTION = 64 * 1024 * 1024
+
+function isMaterialReduction(impact: RightsizingImpact): boolean {
+  return (
+    Math.round(-impact.cpuChange * 1000) >= MIN_CPU_REDUCTION_MILLI ||
+    -impact.memoryChange >= MIN_MEMORY_REDUCTION
+  )
+}
 
 export function classifyRows(rows: RightsizingRow[], replicas = 1, scaledToZero = false): ScanClass {
   const evidenced = rows.filter((row) => !row.queryError && row.fit !== 'insufficient_history')
@@ -56,9 +63,7 @@ export function classifyRows(rows: RightsizingRow[], replicas = 1, scaledToZero 
   )
     return 'increase'
   if (evidenced.some(needsManualReview)) return 'review'
-  const impact = calculateImpact(evidenced, replicas)
-  if (-impact.cpuChange >= MIN_CPU_REDUCTION || -impact.memoryChange >= MIN_MEMORY_REDUCTION)
-    return 'reduction'
+  if (isMaterialReduction(calculateImpact(evidenced, replicas))) return 'reduction'
   return evidenced.length === rows.length ? 'in_range' : 'need_data'
 }
 
@@ -181,8 +186,8 @@ export function workloadResultRows(
       }
       let classification: ScanClass = 'in_range'
       if (impact.cpuChange > 0 || impact.memoryChange > 0) classification = 'increase'
-      else if (impact.cpuChange < 0 || impact.memoryChange < 0) classification = 'reduction'
       else if (review.cpu || review.memory) classification = 'review'
+      else if (isMaterialReduction(impact)) classification = 'reduction'
       else if (rows.some((row) => row.queryError || row.fit === 'insufficient_history'))
         classification = 'need_data'
       return {
@@ -215,7 +220,7 @@ export function compareScanResults(a: RightsizingResultRow, b: RightsizingResult
 
 function impactScore(row: RightsizingResultRow): number {
   return Math.max(
-    Math.abs(row.impact.cpuChange) / MIN_CPU_REDUCTION,
+    Math.abs(row.impact.cpuChange * 1000) / MIN_CPU_REDUCTION_MILLI,
     Math.abs(row.impact.memoryChange) / MIN_MEMORY_REDUCTION,
   )
 }

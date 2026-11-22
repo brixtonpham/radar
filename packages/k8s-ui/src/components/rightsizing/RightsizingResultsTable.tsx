@@ -161,7 +161,7 @@ function ImpactCell({ row }: { row: RightsizingResultRow }) {
   if (row.classification === 'in_range') {
     return (
       <div className="text-xs text-theme-text-tertiary">
-        {row.source === 'datadog' ? 'No suggested change' : 'Below action threshold'}
+        {row.impact.cpuChange < 0 || row.impact.memoryChange < 0 ? 'Below action threshold' : 'No suggested change'}
       </div>
     )
   }
