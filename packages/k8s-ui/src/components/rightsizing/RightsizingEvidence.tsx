@@ -1,5 +1,6 @@
 import { ArrowRight, Loader2 } from 'lucide-react'
 import { Badge } from '../ui/Badge'
+import { managerRefLabel } from '../../utils/gitops-owner'
 import { groupRightsizingRows } from './results-model'
 import {
   explainRightsizingReasons,
@@ -20,8 +21,29 @@ export function RightsizingEvidence({
   compact?: boolean
 }) {
   const datadog = data.source === 'datadog' ? data : undefined
+  const manager = data.managedBy
+  const managerLabel =
+    manager?.name && manager.kind
+      ? managerRefLabel({
+          kind: manager.kind,
+          namespace: manager.namespace ?? '',
+          name: manager.name,
+          group: manager.group,
+        })
+      : manager?.name
+  const managerEvidence = !compact && manager && (
+    <p className="text-xs text-theme-text-secondary">
+      Detected manager · {manager.tool}
+      {managerLabel && ` (${managerLabel})`} · {manager.signal}
+    </p>
+  )
   if (data.rows.length === 0 || (!data.sampleAvailable && !datadog)) {
-    return <RightsizingEmptyState text={data.reason ?? 'No rightsizing evidence is available.'} />
+    return (
+      <>
+        {managerEvidence}
+        <RightsizingEmptyState text={data.reason ?? 'No rightsizing evidence is available.'} />
+      </>
+    )
   }
 
   const byContainer = groupRightsizingRows(data.rows)
@@ -45,13 +67,7 @@ export function RightsizingEvidence({
 
   return (
     <div className="space-y-4">
-      {data.managedBy && (
-        <p className="text-xs text-theme-text-secondary">
-          Check the {data.managedBy.tool}
-          {data.managedBy.name && ` (${data.managedBy.name})`} source before editing. Radar
-          identified it from {data.managedBy.signal}.
-        </p>
-      )}
+      {managerEvidence}
       {data.reason && <p className="text-sm text-theme-text-secondary">{data.reason}</p>}
       {(data.scaledToZero || data.ownerCoverage === 'current_pods') && (
         <div className="flex flex-wrap gap-2">
@@ -149,7 +165,7 @@ function FitCard({
         <ArrowRight className="h-4 w-4 text-theme-text-quaternary" />
         <div>
           <div className="text-[10px] uppercase tracking-wide text-theme-text-quaternary">
-            {manualReview ? 'Candidate for manual review' : 'Suggested next step'}
+            {manualReview ? 'Candidate for manual review' : 'Suggested request'}
           </div>
           <div className="text-lg font-semibold text-theme-text-primary">
             {row.recommendedRequest ?? '—'}
@@ -245,7 +261,10 @@ function FitExplanation({ row, manualReview }: { row: RightsizingRow; manualRevi
   return <p className="mt-3 text-xs text-theme-text-tertiary">{message}</p>
 }
 
-export function getRightsizingExplanation(row: RightsizingRow, manualReview = false): string | undefined {
+export function getRightsizingExplanation(
+  row: RightsizingRow,
+  manualReview = false,
+): string | undefined {
   // A denied pod read leaves currentPodOOM unknown rather than false, so it
   // qualifies whatever else is said instead of replacing it — including a
   // staged reduction, which is exactly where an unchecked pod matters most.
@@ -262,7 +281,10 @@ export function getRightsizingExplanation(row: RightsizingRow, manualReview = fa
   if (row.fit === 'pod_level_request' && row.podLevelRequest && !row.queryError)
     return qualified(podLevelRequestExplanation(row, row.podLevelRequest))
   if (row.reductionLimited && row.calculatedRequest && row.recommendedRequest) {
-    if (manualReview) return qualified(`Demand-based target: ${row.calculatedRequest}. Review the staged change before editing.`)
+    if (manualReview)
+      return qualified(
+        `Demand-based target: ${row.calculatedRequest}. Review the staged change before editing.`,
+      )
     const burstNote = row.bursty && row.peak ? ` CPU P99 reached ${row.peak.formatted}.` : ''
     return qualified(
       `Demand-based target: ${row.calculatedRequest}. Radar suggests ${row.recommendedRequest} as a conservative next step; observe another full window before reducing further.${burstNote}`,

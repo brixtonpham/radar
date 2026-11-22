@@ -24,9 +24,7 @@ up to seven days of Datadog usage. Dollar allocations on the Cost tab still requ
 only. Radar uses the hottest current replica in each complete five-minute bucket.
 The sizing policy, headroom and staged reductions are shared with Prometheus
 rightsizing. CPU needs both P95 and P99 evidence. Missing restart history can
-withhold a memory reduction. Recommendations with enough evidence can include
-a copyable manifest diff. Low-confidence reductions, changes that could affect Guaranteed QoS, and proposals without verifiable HPA settings remain candidates for manual review and are excluded from the diff and fleet totals. Copying checks current access, workload UID, template
-identity and recommendations again.
+withhold a memory reduction. Each container shows its current request, measured demand, coverage and suggested next step when available. Low-confidence reductions, changes that could affect Guaranteed QoS, and proposals without verifiable HPA settings require manual review and are excluded from fleet totals. When Kubernetes metadata identifies a workload manager, Radar displays the tool, its name when available, and the identifying signal.
 
 Radar Hub asks the connected agent for the workload as the signed-in user.
 Access requires a named workload GET and permission to list Pods, plus ReplicaSets

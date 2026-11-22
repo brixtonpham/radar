@@ -4,9 +4,7 @@ Shared, source-distributed Kubernetes UI components used by Radar.
 
 ## Workload rightsizing
 
-`components/rightsizing/RightsizingEvidence` renders container measurements and request guidance from the shared sizing policy. `components/rightsizing/DatadogRightsizingEvidence` adds the current-replica lookback and a verified request diff. Both consume the response types in `types/rightsizing`.
-
-The Datadog host owns loading, errors, authorization and its query cache. Key the component by the viewer, cluster and workload. Keep it mounted while an authorization or identity failure clears the query, passing an undefined detail. This preserves the verification message while removing the old evidence. Its `verify` callback must make a fresh authorized read using the supplied workload UID, template hash and abort signal. Publish that read through `onVerified`, including changed recommendations and revoked approval. Clear stale evidence when `onVerifyError` reports an authorization or identity failure. The component copies only after the fresh response matches the displayed identity and diff.
+`components/rightsizing/RightsizingEvidence` renders per-container measurements, request guidance, and the evidence behind each recommendation. `components/rightsizing/DatadogRightsizingEvidence` adds the lookback and current replica count. Both consume the response types in `types/rightsizing`. The host owns data fetching, authorization, and error states.
 
 ## Toast updates
 

@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { DatadogSizingWorkload, RightsizingRow } from '../../types/rightsizing'
 import { DatadogRightsizingEvidence } from './DatadogRightsizingEvidence'
 import { datadogRowReview, isDatadogRequestActionable } from '../../utils/rightsizing-reasons'
@@ -34,36 +34,42 @@ const sizing: DatadogSizingWorkload = {
   actionableRequests: [],
   rows: [row],
   reviewReasons: { api: { cpu: ['qos_change'] } },
-  managedBy: { tool: 'Helm', name: 'payments', signal: 'labels' },
+  managedBy: {
+    tool: 'flux',
+    kind: 'HelmRelease',
+    namespace: 'apps',
+    name: 'payments',
+    signal: 'labels helm.toolkit.fluxcd.io/name and namespace',
+  },
 }
 
 describe('workload evidence used by embedded and standalone Radar', () => {
   it('retains measurements, the declared manager and the server’s guarded recommendation', () => {
-    const html = renderToStaticMarkup(
-      <DatadogRightsizingEvidence
-        detail={{ configured: true, workloadUID: 'id', templateHash: 'hash', rightsizing: sizing }}
-        refreshing={false}
-        verify={vi.fn()}
-        onVerified={vi.fn()}
-        onVerifyError={vi.fn()}
-      />,
-    )
+    const html = renderToStaticMarkup(<DatadogRightsizingEvidence data={sizing} />)
     for (const text of [
       '2 current replicas',
       '50% coverage',
       '1008 of 2016',
       'P99 peak',
       '80m',
-      'Helm',
-      'payments',
-      'labels',
+      'Detected manager · flux (HelmRelease apps/payments) · labels helm.toolkit.fluxcd.io/name and namespace',
       'Candidate for manual review',
       'Guaranteed QoS',
     ]) {
       expect(html).toContain(text)
     }
-    expect(html).not.toContain('Copy request diff')
     expect(isDatadogRequestActionable(sizing, row)).toBe(false)
     expect(datadogRowReview(sizing, row)).toContain('Guaranteed QoS')
+  })
+  it('labels an eligible request and keeps the guard decision attached to its row', () => {
+    const data: DatadogSizingWorkload = {
+      ...sizing,
+      actionableRequests: [{ container: row.container, resource: row.resource }],
+      reviewReasons: {},
+    }
+    const html = renderToStaticMarkup(<DatadogRightsizingEvidence data={data} />)
+    expect(html).toContain('Current request')
+    expect(html).toContain('Suggested request')
+    expect(html).not.toContain('Candidate for manual review')
   })
 })

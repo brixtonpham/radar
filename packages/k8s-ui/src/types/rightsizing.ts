@@ -82,10 +82,4 @@ export interface DatadogSizingWorkload extends WorkloadRightsizingEvidence {
 
 export type DatadogSizingDetail =
   | { configured: false; reason?: string }
-  | {
-      configured: true
-      workloadUID: string
-      templateHash: string
-      rightsizing: DatadogSizingWorkload
-      manifestDiff?: string
-    }
+  | { configured: true; rightsizing: DatadogSizingWorkload }

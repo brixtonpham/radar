@@ -3,25 +3,25 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { copyText } from '@skyhook-io/k8s-ui/utils/clipboard'
 import { DatadogRightsizingPanel } from './DatadogRightsizingPanel'
-import { ApiError } from '../../api/client'
 import { getApiBase } from '../../api/config'
 
 const state = vi.hoisted(() => ({ fetch: vi.fn(), support: 'supported' }))
-vi.mock('../../api/client', async (importOriginal) => ({
-  ApiError: (await importOriginal<typeof import('../../api/client')>()).ApiError,
+vi.mock('../../api/client', () => ({
   fetchJSON: (...args: unknown[]) => state.fetch(...args),
   usePrometheusStatus: () => ({ data: { connected: false } }),
   useRadarFeature: () => ({ support: state.support }),
 }))
-vi.mock('@skyhook-io/k8s-ui/utils/clipboard', () => ({ copyText: vi.fn(async () => true) }))
 const detail = {
   configured: true,
-  templateHash: 'a',
-  workloadUID: 'uid',
-  manifestDiff: '- 500m\n+ 250m',
   rightsizing: {
+    kind: 'Deployment',
+    namespace: 'team',
+    name: 'api',
+    source: 'datadog',
+    ownerCoverage: 'current_pods',
+    replicas: 1,
+    scaledToZero: false,
     rows: [],
     actionableRequests: [],
     sampleAvailable: false,
@@ -36,7 +36,6 @@ let host: HTMLDivElement
 beforeEach(() => {
   state.support = 'supported'
   state.fetch.mockReset()
-  vi.mocked(copyText).mockClear()
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   host = document.createElement('div')
@@ -46,19 +45,6 @@ afterEach(async () => {
   await act(async () => root.unmount())
   client.clear()
 })
-
-async function clickCopy() {
-  await act(async () =>
-    Array.from(host.querySelectorAll('button'))
-      .find((button) => button.textContent === 'Review request diff')!
-      .click(),
-  )
-  await act(async () =>
-    Array.from(host.querySelectorAll('button'))
-      .find((button) => button.textContent === 'Copy request diff')!
-      .click(),
-  )
-}
 
 async function render(name = 'api') {
   await act(async () =>
@@ -76,121 +62,42 @@ it('skips sizing reads for spokes without the feature', async () => {
   expect(state.fetch).not.toHaveBeenCalled()
 })
 
-it.each([false, true])(
-  'copies only if a fresh authorized diff matches the preview (changed=%s)',
-  async (changed) => {
-    state.fetch
-      .mockResolvedValueOnce(detail)
-      .mockResolvedValueOnce(changed ? { ...detail, manifestDiff: '- 500m\n+ 350m' } : detail)
-    await render()
-    await vi.waitFor(() => expect(host.textContent).toContain('Copy request diff'))
-    await clickCopy()
-    const calls = state.fetch.mock.calls
-    expect(calls[1][0]).toBe(
-      '/metrics/datadog/rightsizing/Deployment/team/api?workloadUID=uid&templateHash=a',
-    )
-    if (changed) {
-      expect(copyText).not.toHaveBeenCalled()
-      expect(host.textContent).toContain('recommendation changed')
-      await vi.waitFor(() => expect(host.textContent).toContain('350m'))
-    } else {
-      expect(copyText).toHaveBeenCalledWith(detail.manifestDiff)
-    }
-  },
-)
-
-it('explains revoked approval and removes the diff', async () => {
-  state.fetch.mockResolvedValueOnce(detail).mockResolvedValueOnce({ configured: false })
+it('reads the selected workload and displays its measured coverage', async () => {
+  state.fetch.mockResolvedValueOnce(detail)
   await render()
-  await vi.waitFor(() => expect(host.textContent).toContain('Copy request diff'))
-  await clickCopy()
-  await vi.waitFor(() => expect(host.textContent).toContain('no longer enabled'))
-  expect(host.textContent).not.toContain('Copy request diff')
-  expect(copyText).not.toHaveBeenCalled()
+  await vi.waitFor(() => expect(host.textContent).toContain('Insufficient history'))
+  expect(host.textContent).toContain('1 current replica')
+  expect(state.fetch).toHaveBeenCalledWith(
+    '/metrics/datadog/rightsizing/Deployment/team/api',
+    expect.any(AbortSignal),
+  )
 })
 
-it('drops a pending copy when moving to another workload', async () => {
-  let resolve!: (value: typeof detail) => void
+it('removes cached workload evidence when a fresh read is denied', async () => {
   state.fetch
     .mockResolvedValueOnce(detail)
-    .mockReturnValueOnce(
-      new Promise<typeof detail>((done) => {
-        resolve = done
-      }),
-    )
-    .mockResolvedValueOnce({ configured: false })
+    .mockRejectedValueOnce(new Error('Kubernetes denied this read'))
   await render()
-  await vi.waitFor(() => expect(host.textContent).toContain('Review request diff'))
-  await clickCopy()
-  const signal = state.fetch.mock.calls[1][1] as AbortSignal
-  await render('other')
-  expect(signal.aborted).toBe(true)
-  await act(async () => resolve(detail))
-  expect(copyText).not.toHaveBeenCalled()
-})
-
-it('clears the cached preview when the verification read is denied', async () => {
-  const denial = new ApiError('Kubernetes denied this read', 403)
-  state.fetch
-    .mockResolvedValueOnce(detail)
-    .mockRejectedValueOnce(denial)
-    .mockRejectedValueOnce(denial)
-  await render()
-  await vi.waitFor(() => expect(host.textContent).toContain('Review request diff'))
-  await clickCopy()
+  await vi.waitFor(() => expect(host.textContent).toContain('Insufficient history'))
+  await act(async () => {
+    await client.invalidateQueries({
+      queryKey: [
+        'datadog-rightsizing',
+        getApiBase(),
+        '/metrics/datadog/rightsizing/Deployment/team/api',
+      ],
+    })
+  })
   await vi.waitFor(() =>
     expect(host.querySelector('[role="alert"]')?.textContent).toContain(
       'Kubernetes denied this read',
     ),
   )
-  expect(host.textContent).not.toContain(detail.manifestDiff)
-  expect(copyText).not.toHaveBeenCalled()
+  expect(host.textContent).not.toContain('Insufficient history')
 })
 
-it('retains an identity conflict explanation after a fresh workload read succeeds', async () => {
-  const conflict = new ApiError('The workload template changed', 409)
-  state.fetch
-    .mockResolvedValueOnce(detail)
-    .mockRejectedValueOnce(conflict)
-    .mockResolvedValueOnce({
-      ...detail,
-      templateHash: 'new',
-      manifestDiff: '- 500m\n+ 450m',
-    })
+it('reports disabled cluster approval', async () => {
+  state.fetch.mockResolvedValueOnce({ configured: false })
   await render()
-  await vi.waitFor(() => expect(host.textContent).toContain('Review request diff'))
-  await clickCopy()
-  await vi.waitFor(() => expect(host.textContent).toContain('450m'))
-  expect(host.textContent).toContain(
-    'Could not verify the request diff. The workload template changed',
-  )
-  expect(host.textContent).not.toContain(detail.manifestDiff)
-  expect(copyText).not.toHaveBeenCalled()
-})
-
-it('clears the clipboard success message when a background refresh replaces the diff', async () => {
-  state.fetch.mockResolvedValue(detail)
-  await render()
-  await vi.waitFor(() => expect(host.textContent).toContain('Review request diff'))
-  await clickCopy()
-  expect(host.textContent).toContain('Diff copied.')
-  await act(async () => {
-    client.setQueryData(
-      ['datadog-rightsizing', getApiBase(), '/metrics/datadog/rightsizing/Deployment/team/api'],
-      { ...detail, manifestDiff: '- 500m\n+ 450m' },
-    )
-  })
-  await vi.waitFor(() => expect(host.textContent).toContain('450m'))
-  expect(host.textContent).not.toContain('Diff copied.')
-})
-
-it('explains when the verified workload no longer has a diff to copy', async () => {
-  state.fetch.mockResolvedValueOnce(detail).mockResolvedValueOnce({ ...detail, manifestDiff: undefined })
-  await render()
-  await vi.waitFor(() => expect(host.textContent).toContain('Review request diff'))
-  await clickCopy()
-  await vi.waitFor(() => expect(host.textContent).not.toContain('Review request diff'))
-  expect(host.textContent).toContain('The request diff is no longer available.')
-  expect(host.textContent).not.toContain('Review the refreshed diff')
-  expect(copyText).not.toHaveBeenCalled()
+  await vi.waitFor(() => expect(host.textContent).toContain('no longer enabled'))
 })
