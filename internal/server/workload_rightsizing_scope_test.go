@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"github.com/skyhook-io/radar/internal/cloud"
+	"github.com/skyhook-io/radar/pkg/auth"
 	"github.com/skyhook-io/radar/pkg/rightsizing"
 	appsv1 "k8s.io/api/apps/v1"
+	authv1 "k8s.io/api/authorization/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -22,6 +24,8 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/utils/ptr"
+	"maps"
+	"slices"
 )
 
 func TestRightsizingScopeTunnelAndCaller(t *testing.T) {
@@ -57,12 +61,27 @@ func TestSizingInventoryExactReads(t *testing.T) {
 	}
 	client.PrependReactor("get", "statefulsets", deny)
 	client.PrependReactor("list", "replicasets", deny)
-	got := readSizingInventory(t.Context(), client, []string{"team"})
+	got := readSizingInventory(t.Context(), client, fake.NewSimpleClientset(), []string{"team"})
 	if got.Partial || len(got.Items) != 1 || got.Items[0].Name != "ok" {
 		t.Fatal(got)
 	}
+	// An exact self-review avoids per-object GETs for a namespace-wide reader.
+	broad := fake.NewSimpleClientset()
+	broad.PrependReactor("create", "selfsubjectaccessreviews", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		req := a.(k8stesting.CreateAction).GetObject().(*authv1.SelfSubjectAccessReview)
+		attrs := req.Spec.ResourceAttributes
+		if attrs.Group != "apps" || attrs.Verb != "get" || attrs.Namespace != "team" {
+			t.Fatalf("unexpected broad read %#v", attrs)
+		}
+		return true, &authv1.SelfSubjectAccessReview{Status: authv1.SubjectAccessReviewStatus{Allowed: attrs.Resource == "daemonsets"}}, nil
+	})
+	client.ClearActions()
+	got = readSizingInventory(t.Context(), client, broad, []string{"team"})
+	if len(got.Items) != 1 || slices.ContainsFunc(client.Actions(), func(a k8stesting.Action) bool { return a.Matches("get", "daemonsets") }) {
+		t.Fatal(got, client.Actions())
+	}
 	client.PrependReactor("list", "pods", deny)
-	got = readSizingInventory(t.Context(), client, []string{"team"})
+	got = readSizingInventory(t.Context(), client, fake.NewSimpleClientset(), []string{"team"})
 	if got.Partial || len(got.Items) != 0 {
 		t.Fatal(got)
 	}
@@ -89,7 +108,7 @@ func TestSizingTemplateAndCurrentReplicaGuards(t *testing.T) {
 		{"partition", func(sts *appsv1.StatefulSet, _ *corev1.Pod) { sts.Status.CurrentRevision = "old" }},
 		{"partial", func(sts *appsv1.StatefulSet, _ *corev1.Pod) { sts.Status.UpdatedReplicas = 0 }},
 		{"old pod", func(_ *appsv1.StatefulSet, p *corev1.Pod) { p.Labels[appsv1.ControllerRevisionHashLabelKey] = "old" }},
-		{"old image", func(_ *appsv1.StatefulSet, p *corev1.Pod) { p.Spec.Containers[0].Image = "api:v1" }},
+		{"registry rewrite", func(_ *appsv1.StatefulSet, p *corev1.Pod) { p.Spec.Containers[0].Image = "api:v1" }},
 		{"missing container", func(_ *appsv1.StatefulSet, p *corev1.Pod) { p.Spec.Containers = nil }},
 		{"not ready", func(_ *appsv1.StatefulSet, p *corev1.Pod) { p.Status.Conditions = nil }},
 		{"different group", func(_ *appsv1.StatefulSet, p *corev1.Pod) { p.OwnerReferences[0].APIVersion = "test.example/v1" }},
@@ -108,13 +127,37 @@ func TestSizingTemplateAndCurrentReplicaGuards(t *testing.T) {
 				t.Fatal(err)
 			}
 			wire, err := json.Marshal(scope)
+			var projection struct {
+				PodSpec map[string]json.RawMessage `json:"podSpec"`
+			}
+			if err := json.Unmarshal(wire, &projection); err != nil {
+				t.Fatal(err)
+			}
+			if got := slices.Sorted(maps.Keys(projection.PodSpec)); !slices.Equal(got, []string{"containers"}) {
+				t.Fatalf("unexpected PodSpec fields: %v", got)
+			}
+			var projected []map[string]json.RawMessage
+			if err := json.Unmarshal(projection.PodSpec["containers"], &projected); err != nil {
+				t.Fatal(err)
+			}
+			if len(projected) != 1 || !slices.Equal(slices.Sorted(maps.Keys(projected[0])), []string{"name", "resources"}) {
+				t.Fatalf("unexpected container fields: %v", projected)
+			}
 			if err != nil || strings.Contains(string(wire), "sensitive-example") || len(scope.TemplateHash) != 64 {
 				t.Fatalf("unsafe projection or missing hash")
 			}
-			pods, err := verifiedSizingPods(t.Context(), fake.NewSimpleClientset(p), u, scope, tmpl, sel)
-			if tc.name == "stable" {
+			terminal := p.DeepCopy()
+			terminal.Name = "previous"
+			terminal.UID = "previous"
+			terminal.Status.Phase = corev1.PodFailed
+			pods, err := verifiedSizingPods(t.Context(), fake.NewSimpleClientset(p, terminal), u, scope, tmpl, sel)
+			if tc.name == "stable" || tc.name == "registry rewrite" {
 				if err != nil || len(pods) != 1 {
 					t.Fatalf("got %v, %v", pods, err)
+				}
+			} else if tc.name == "missing container" {
+				if !errors.Is(err, errSizingAdmission) {
+					t.Fatalf("missing admission error: %v", err)
 				}
 			} else if !errors.Is(err, errSizingRollout) {
 				t.Fatalf("want rollout conflict, got %v", err)
@@ -166,5 +209,39 @@ func TestRightsizingScopeDeploymentRejectsStaleReplicaSet(t *testing.T) {
 		if !changed && (err != nil || len(pods) != 1) {
 			t.Fatalf("current ReplicaSet rejected: %v", err)
 		}
+	}
+}
+
+func TestSizingInventoryInvalidNamespace(t *testing.T) {
+	s := &Server{}
+	r := httptest.NewRequest(http.MethodGet, "/api/agent/workload-rightsizing-inventory?namespace=bad.name", nil)
+	r = r.WithContext(auth.ContextWithUser(r.Context(), &auth.User{Username: "reader"}))
+	w := httptest.NewRecorder()
+	cloud.AuthenticatedTunnelHandler(http.HandlerFunc(s.handleWorkloadRightsizingInventory)).ServeHTTP(w, r)
+	if w.Code != 400 {
+		t.Fatalf("%d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRightsizingScopeDaemonSetRevisionWithoutPodLabels(t *testing.T) {
+	options := metav1.ObjectMeta{Namespace: "team", Name: "collector", UID: "ds", Generation: 1, CreationTimestamp: metav1.Now()}
+	container := corev1.Container{Name: "agent", Image: "agent:v1"}
+	selector := &metav1.LabelSelector{MatchLabels: map[string]string{"app": "collector"}}
+	ds := &appsv1.DaemonSet{ObjectMeta: options, Spec: appsv1.DaemonSetSpec{Selector: selector, Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{container}}}}, Status: appsv1.DaemonSetStatus{DesiredNumberScheduled: 1, CurrentNumberScheduled: 1, UpdatedNumberScheduled: 1, NumberReady: 1, ObservedGeneration: 1}}
+	ref := *metav1.NewControllerRef(ds, appsv1.SchemeGroupVersion.WithKind("DaemonSet"))
+	revision := &appsv1.ControllerRevision{ObjectMeta: metav1.ObjectMeta{Name: "current", Namespace: "team", Labels: map[string]string{appsv1.ControllerRevisionHashLabelKey: "hash"}, OwnerReferences: []metav1.OwnerReference{ref}}, Revision: 7}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "pod", Name: "collector-0", Namespace: "team", OwnerReferences: []metav1.OwnerReference{ref}, Labels: map[string]string{"app": "collector", appsv1.ControllerRevisionHashLabelKey: "hash"}}, Spec: ds.Spec.Template.Spec, Status: corev1.PodStatus{Phase: corev1.PodRunning, Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}}
+	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(ds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := &unstructured.Unstructured{Object: m}
+	s, tmpl, sel, err := sizingTemplate("DaemonSet", u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pods, err := verifiedSizingPods(t.Context(), fake.NewSimpleClientset(revision, pod), u, s, tmpl, sel)
+	if err != nil || len(pods) != 1 {
+		t.Fatalf("current DaemonSet: %v, %v", pods, err)
 	}
 }

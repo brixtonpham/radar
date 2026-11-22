@@ -60,6 +60,9 @@ func (s *Server) handleWorkloadRightsizingScope(w http.ResponseWriter, r *http.R
 		s.writeError(w, 403, "Workload is outside Radar's namespace scope")
 		return
 	}
+	if !s.requireConnected(w) {
+		return
+	}
 	_, generation := k8s.GetClientWithGeneration()
 	client, typed := s.getDynamicClientForRequest(r), s.getClientForRequest(r)
 	if client == nil || typed == nil {
@@ -73,7 +76,7 @@ func (s *Server) handleWorkloadRightsizingScope(w http.ResponseWriter, r *http.R
 		return
 	}
 	if apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) {
-		s.writeError(w, 403, "Rightsizing requires access to this workload, its Pods and the ReplicaSets of a Deployment")
+		s.writeError(w, 403, "Rightsizing requires access to this workload")
 		return
 	}
 	if err != nil {
@@ -87,7 +90,15 @@ func (s *Server) handleWorkloadRightsizingScope(w http.ResponseWriter, r *http.R
 	}
 	pods, err := verifiedSizingPods(ctx, typed, owner, scope, template, selector)
 	if apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) {
-		s.writeError(w, 403, "Rightsizing requires permission to list Pods and controller revisions for the workload")
+		s.writeError(w, 403, "Rightsizing requires permission to list Pods, plus ReplicaSets for Deployments or ControllerRevisions for DaemonSets")
+		return
+	}
+	if errors.Is(err, errSizingAdmission) {
+		s.writeErrorCode(w, 409, "pod_resources_changed", "Live Pod resources differ from the workload template. Check admission defaults, a VPA or in-place resizing")
+		return
+	}
+	if errors.Is(err, errSizingLimit) {
+		s.writeErrorCode(w, 422, "inventory_limit", "Rightsizing supports up to 512 matching Pods and 512 controller revisions per workload")
 		return
 	}
 	if errors.Is(err, errSizingRollout) {
@@ -106,10 +117,10 @@ func (s *Server) handleWorkloadRightsizingScope(w http.ResponseWriter, r *http.R
 			return
 		}
 		pod := rightsizing.Pod{Name: p.Name, UID: string(p.UID), CreatedAt: p.CreationTimestamp.Time, RestartCounts: map[string]int32{}}
-		for _, c := range p.Spec.Containers {
+		for _, c := range scope.PodSpec.Containers {
 			pod.Containers = append(pod.Containers, c.Name)
 		}
-		for _, c := range p.Spec.InitContainers {
+		for _, c := range scope.PodSpec.InitContainers {
 			if c.RestartPolicy != nil && *c.RestartPolicy == corev1.ContainerRestartPolicyAlways {
 				pod.Containers = append(pod.Containers, c.Name)
 			}
@@ -198,10 +209,26 @@ func sizingResources(r *corev1.ResourceRequirements) *corev1.ResourceRequirement
 	if r == nil {
 		return nil
 	}
-	return &corev1.ResourceRequirements{Requests: r.Requests, Limits: r.Limits}
+	project := func(in corev1.ResourceList) corev1.ResourceList {
+		var out corev1.ResourceList
+		for _, key := range []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory} {
+			if q, ok := in[key]; ok {
+				if out == nil {
+					out = corev1.ResourceList{}
+				}
+				out[key] = q
+			}
+		}
+		return out
+	}
+	return &corev1.ResourceRequirements{Requests: project(r.Requests), Limits: project(r.Limits)}
 }
 
-var errSizingRollout = errors.New("cannot verify all replicas run the current template")
+var (
+	errSizingRollout   = errors.New("cannot verify all replicas run the current template")
+	errSizingAdmission = errors.New("runtime container resources differ from template")
+	errSizingLimit     = errors.New("sizing inventory exceeds limit")
+)
 
 // Status describes an earlier observation. Check the live Pods and revision identities too.
 func verifiedSizingPods(ctx context.Context, client kubernetes.Interface, owner *unstructured.Unstructured, scope rightsizing.Scope, template corev1.PodTemplateSpec, selector labels.Selector) ([]corev1.Pod, error) {
@@ -212,7 +239,7 @@ func verifiedSizingPods(ctx context.Context, client kubernetes.Interface, owner 
 		return nil, err
 	}
 	if list.Continue != "" || len(list.Items) > 512 {
-		return nil, fmt.Errorf("pod inventory exceeded limit")
+		return nil, errSizingLimit
 	}
 	if !sizingControllerReady(owner, scope.Kind, scope.Replicas) {
 		return nil, errSizingRollout
@@ -226,7 +253,7 @@ func verifiedSizingPods(ctx context.Context, client kubernetes.Interface, owner 
 			return nil, err
 		}
 		if sets.Continue != "" || len(sets.Items) > 512 {
-			return nil, fmt.Errorf("replicaset inventory exceeded limit")
+			return nil, errSizingLimit
 		}
 		desired := template.DeepCopy()
 		delete(desired.Labels, appsv1.DefaultDeploymentUniqueLabelKey)
@@ -252,12 +279,12 @@ func verifiedSizingPods(ctx context.Context, client kubernetes.Interface, owner 
 			return nil, errSizingRollout
 		}
 	case "DaemonSet":
-		revisions, err := client.AppsV1().ControllerRevisions(ns).List(ctx, opts)
+		revisions, err := client.AppsV1().ControllerRevisions(ns).List(ctx, metav1.ListOptions{Limit: 513})
 		if err != nil {
 			return nil, err
 		}
 		if revisions.Continue != "" || len(revisions.Items) > 512 {
-			return nil, fmt.Errorf("revision inventory exceeded limit")
+			return nil, errSizingLimit
 		}
 		var records []unstructured.Unstructured
 		for i := range revisions.Items {
@@ -277,6 +304,9 @@ func verifiedSizingPods(ctx context.Context, client kubernetes.Interface, owner 
 	pods := make([]corev1.Pod, 0)
 	for i := range list.Items {
 		p := &list.Items[i]
+		if p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
+			continue
+		}
 		ref := metav1.GetControllerOf(p)
 		if ref == nil {
 			continue
@@ -288,8 +318,12 @@ func verifiedSizingPods(ctx context.Context, client kubernetes.Interface, owner 
 		} else if !sizingControllerRef(ref, owner.GetUID(), scope.Kind, scope.Name) {
 			continue
 		}
-		if revision == "" || p.Labels[revisionLabel] != revision || p.DeletionTimestamp != nil || p.Status.Phase != corev1.PodRunning || !sizingPodMatches(p, template.Spec) {
+		if revision == "" || p.Labels[revisionLabel] != revision || p.DeletionTimestamp != nil || p.Status.Phase != corev1.PodRunning ||
+			!slices.ContainsFunc(p.Status.Conditions, func(c corev1.PodCondition) bool { return c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue }) {
 			return nil, errSizingRollout
+		}
+		if !sizingPodMatches(p, template.Spec) {
+			return nil, errSizingAdmission
 		}
 		pods = append(pods, *p)
 	}
@@ -322,14 +356,13 @@ func sizingControllerReady(owner *unstructured.Unstructured, kind string, desire
 }
 
 func sizingPodMatches(p *corev1.Pod, spec corev1.PodSpec) bool {
-	ready := slices.ContainsFunc(p.Status.Conditions, func(c corev1.PodCondition) bool { return c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue })
-	if !ready || !equality.Semantic.DeepEqual(sizingResources(p.Spec.Resources), sizingResources(spec.Resources)) {
+	if !equality.Semantic.DeepEqual(sizingResources(p.Spec.Resources), sizingResources(spec.Resources)) {
 		return false
 	}
 	match := func(desired, actual []corev1.Container) bool {
 		for _, c := range desired {
 			if !slices.ContainsFunc(actual, func(a corev1.Container) bool {
-				return c.Name == a.Name && c.Image == a.Image && equality.Semantic.DeepEqual(sizingResources(&a.Resources), sizingResources(&c.Resources))
+				return c.Name == a.Name && equality.Semantic.DeepEqual(sizingResources(&a.Resources), sizingResources(&c.Resources))
 			}) {
 				return false
 			}

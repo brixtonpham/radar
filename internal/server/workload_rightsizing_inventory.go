@@ -9,6 +9,7 @@ import (
 	"github.com/skyhook-io/radar/internal/cloud"
 	"github.com/skyhook-io/radar/internal/k8s"
 	"github.com/skyhook-io/radar/internal/prometheus"
+	"github.com/skyhook-io/radar/pkg/k8score"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -16,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 )
 
 type sizingCandidate struct {
@@ -34,13 +36,22 @@ func (s *Server) handleWorkloadRightsizingInventory(w http.ResponseWriter, r *ht
 	if !s.sizingCaller(w, r) {
 		return
 	}
-	if ns := r.URL.Query().Get("namespace"); ns != "" && (len(validation.IsDNS1123Label(ns)) != 0 || outsideNamespacePin(ns) != nil) {
-		s.writeError(w, 403, "Namespace is outside the rightsizing scope")
+	if ns := r.URL.Query().Get("namespace"); ns != "" {
+		if len(validation.IsDNS1123Label(ns)) > 0 {
+			s.writeError(w, 400, "Invalid Kubernetes namespace")
+			return
+		}
+		if outsideNamespacePin(ns) != nil {
+			s.writeError(w, 403, "Namespace is outside the rightsizing scope")
+			return
+		}
+	}
+	if !s.requireConnected(w) {
 		return
 	}
 	_, gen := k8s.GetClientWithGeneration()
-	client := s.getDynamicClientForRequest(r)
-	if client == nil {
+	client, caller := s.getDynamicClientForRequest(r), s.getClientForRequest(r)
+	if client == nil || caller == nil {
 		s.writeError(w, 503, "Kubernetes is unavailable")
 		return
 	}
@@ -73,7 +84,7 @@ func (s *Server) handleWorkloadRightsizingInventory(w http.ResponseWriter, r *ht
 	sort.Strings(namespaces)
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	out := readSizingInventory(ctx, client, namespaces)
+	out := readSizingInventory(ctx, client, caller, namespaces)
 	var err error
 	out.ClusterUID, err = cloud.DiscoverClusterUID(r.Context(), k8s.GetClientInterface())
 	if _, current := k8s.GetClientWithGeneration(); current != gen {
@@ -87,7 +98,7 @@ func (s *Server) handleWorkloadRightsizingInventory(w http.ResponseWriter, r *ht
 	s.writeJSON(w, out)
 }
 
-func readSizingInventory(ctx context.Context, client dynamic.Interface, namespaces []string) sizingInventory {
+func readSizingInventory(ctx context.Context, client dynamic.Interface, caller kubernetes.Interface, namespaces []string) sizingInventory {
 	const itemLimit = 2000
 	out := sizingInventory{Items: []sizingCandidate{}}
 	for _, ns := range namespaces {
@@ -114,6 +125,8 @@ func readSizingInventory(ctx context.Context, client dynamic.Interface, namespac
 				}
 			}
 			res := client.Resource(appsv1.SchemeGroupVersion.WithResource(wk.Resource)).Namespace(ns)
+			// A fresh self-review runs through the caller's exact token or impersonation.
+			broadGet, _ := k8score.CanI(ctx, caller, ns, "apps", wk.Resource, "get")
 			var token string
 			for {
 				page, err := res.List(ctx, metav1.ListOptions{Limit: 100, Continue: token})
@@ -127,9 +140,11 @@ func readSizingInventory(ctx context.Context, client dynamic.Interface, namespac
 						out.Partial = true
 						continue
 					}
-					if _, err := res.Get(ctx, obj.GetName(), metav1.GetOptions{}); err != nil {
-						out.Partial = out.Partial || !(apierrors.IsForbidden(err) || apierrors.IsNotFound(err))
-						continue
+					if !broadGet {
+						if _, err := res.Get(ctx, obj.GetName(), metav1.GetOptions{}); err != nil {
+							out.Partial = out.Partial || !(apierrors.IsForbidden(err) || apierrors.IsNotFound(err))
+							continue
+						}
 					}
 					if len(out.Items) >= itemLimit {
 						out.Partial = true
