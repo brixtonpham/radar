@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { DatadogRightsizingEvidence } from '@skyhook-io/k8s-ui/components/rightsizing/DatadogRightsizingEvidence'
 import type { DatadogSizingDetail } from '@skyhook-io/k8s-ui/types/rightsizing'
-import { fetchJSON, useRadarFeature } from '../../api/client'
+import { ApiError, fetchJSON, useRadarFeature } from '../../api/client'
 import { getApiBase } from '../../api/config'
 import { ConnectedPrometheusRightsizingPanel } from './RightsizingStrip'
 
@@ -66,20 +66,23 @@ export function DatadogRightsizingPanel({
         <p role="status" className="mt-2 text-sm text-theme-text-secondary">
           Checking workload demand…
         </p>
-      ) : (
-        <DatadogRightsizingEvidence
-          key={JSON.stringify(queryKey)}
-          detail={query.data}
-          refreshing={query.isFetching}
-          verify={(subject, signal) =>
-            fetchJSON<DatadogSizingDetail>(path + '?' + new URLSearchParams(subject), signal)
-          }
-          onVerified={(fresh) => client.setQueryData(queryKey, fresh)}
-          onVerifyError={() => {
+      ) : null}
+      <DatadogRightsizingEvidence
+        key={JSON.stringify(queryKey)}
+        detail={!query.error && query.data?.configured ? query.data : undefined}
+        refreshing={query.isFetching}
+        verify={(subject, signal) =>
+          fetchJSON<DatadogSizingDetail>(path + '?' + new URLSearchParams(subject), signal)
+        }
+        onVerified={(fresh) => client.setQueryData(queryKey, fresh)}
+        onVerifyError={(error) => {
+          if (error instanceof ApiError && [401, 403, 404, 409, 410].includes(error.status)) {
             void client.resetQueries({ queryKey, exact: true })
-          }}
-        />
-      )}
+          } else {
+            void query.refetch()
+          }
+        }}
+      />
     </section>
   )
 }

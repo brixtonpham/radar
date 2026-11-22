@@ -5,9 +5,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { copyText } from '@skyhook-io/k8s-ui/utils/clipboard'
 import { DatadogRightsizingPanel } from './DatadogRightsizingPanel'
+import { ApiError } from '../../api/client'
+import { getApiBase } from '../../api/config'
 
 const state = vi.hoisted(() => ({ fetch: vi.fn(), support: 'supported' }))
-vi.mock('../../api/client', () => ({
+vi.mock('../../api/client', async (importOriginal) => ({
+  ApiError: (await importOriginal<typeof import('../../api/client')>()).ApiError,
   fetchJSON: (...args: unknown[]) => state.fetch(...args),
   usePrometheusStatus: () => ({ data: { connected: false } }),
   useRadarFeature: () => ({ support: state.support }),
@@ -89,7 +92,7 @@ it.each([false, true])(
     if (changed) {
       expect(copyText).not.toHaveBeenCalled()
       expect(host.textContent).toContain('recommendation changed')
-      expect(host.textContent).toContain('350m')
+      await vi.waitFor(() => expect(host.textContent).toContain('350m'))
     } else {
       expect(copyText).toHaveBeenCalledWith(detail.manifestDiff)
     }
@@ -127,7 +130,7 @@ it('drops a pending copy when moving to another workload', async () => {
 })
 
 it('clears the cached preview when the verification read is denied', async () => {
-  const denial = Object.assign(new Error('Kubernetes denied this read'), { status: 403 })
+  const denial = new ApiError('Kubernetes denied this read', 403)
   state.fetch
     .mockResolvedValueOnce(detail)
     .mockRejectedValueOnce(denial)
@@ -142,4 +145,41 @@ it('clears the cached preview when the verification read is denied', async () =>
   )
   expect(host.textContent).not.toContain(detail.manifestDiff)
   expect(copyText).not.toHaveBeenCalled()
+})
+
+it('retains an identity conflict explanation after a fresh workload read succeeds', async () => {
+  const conflict = new ApiError('The workload template changed', 409)
+  state.fetch
+    .mockResolvedValueOnce(detail)
+    .mockRejectedValueOnce(conflict)
+    .mockResolvedValueOnce({
+      ...detail,
+      templateHash: 'new',
+      manifestDiff: '- 500m\n+ 450m',
+    })
+  await render()
+  await vi.waitFor(() => expect(host.textContent).toContain('Review request diff'))
+  await clickCopy()
+  await vi.waitFor(() => expect(host.textContent).toContain('450m'))
+  expect(host.textContent).toContain(
+    'Could not verify the request diff. The workload template changed',
+  )
+  expect(host.textContent).not.toContain(detail.manifestDiff)
+  expect(copyText).not.toHaveBeenCalled()
+})
+
+it('clears the clipboard success message when a background refresh replaces the diff', async () => {
+  state.fetch.mockResolvedValue(detail)
+  await render()
+  await vi.waitFor(() => expect(host.textContent).toContain('Review request diff'))
+  await clickCopy()
+  expect(host.textContent).toContain('Diff copied.')
+  await act(async () => {
+    client.setQueryData(
+      ['datadog-rightsizing', getApiBase(), '/metrics/datadog/rightsizing/Deployment/team/api'],
+      { ...detail, manifestDiff: '- 500m\n+ 450m' },
+    )
+  })
+  await vi.waitFor(() => expect(host.textContent).toContain('450m'))
+  expect(host.textContent).not.toContain('Diff copied.')
 })

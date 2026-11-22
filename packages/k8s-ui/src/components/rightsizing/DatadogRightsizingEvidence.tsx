@@ -7,7 +7,7 @@ import { RightsizingEvidence } from './RightsizingEvidence'
 type AuthorizedDetail = Extract<DatadogSizingDetail, { configured: true }>
 
 interface DatadogRightsizingEvidenceProps {
-  detail: AuthorizedDetail
+  detail?: AuthorizedDetail
   refreshing: boolean
   verify: (
     subject: Pick<AuthorizedDetail, 'workloadUID' | 'templateHash'>,
@@ -25,11 +25,14 @@ export function DatadogRightsizingEvidence({
   onVerifyError,
 }: DatadogRightsizingEvidenceProps) {
   const [checking, setChecking] = useState(false)
-  const [message, setMessage] = useState('')
+  const [notice, setNotice] = useState<{ text: string; kind: 'verification' | 'clipboard' }>()
   const pending = useRef<AbortController | null>(null)
-  const { rightsizing, workloadUID, templateHash, manifestDiff } = detail
+  const workloadUID = detail?.workloadUID
+  const templateHash = detail?.templateHash
+  const manifestDiff = detail?.manifestDiff
   useLayoutEffect(() => {
     setChecking(false)
+    setNotice((previous) => (previous?.kind === 'clipboard' ? undefined : previous))
     return () => {
       pending.current?.abort()
       pending.current = null
@@ -37,11 +40,11 @@ export function DatadogRightsizingEvidence({
   }, [workloadUID, templateHash, manifestDiff])
 
   async function copyDiff() {
-    if (pending.current || refreshing || !manifestDiff) return
+    if (pending.current || refreshing || !manifestDiff || !workloadUID || !templateHash) return
     const controller = new AbortController()
     pending.current = controller
     setChecking(true)
-    setMessage('')
+    setNotice(undefined)
     try {
       const fresh = await verify({ workloadUID, templateHash }, controller.signal)
       if (controller.signal.aborted) return
@@ -52,18 +55,31 @@ export function DatadogRightsizingEvidence({
         fresh.templateHash !== templateHash ||
         fresh.manifestDiff !== manifestDiff
       ) {
-        setMessage('The recommendation changed. Review the refreshed diff before copying.')
+        if (fresh.configured)
+          setNotice({
+            kind: 'verification',
+            text: 'The recommendation changed. Review the refreshed diff before copying.',
+          })
         return
       }
       if (controller.signal.aborted) return
       const copied = await copyText(fresh.manifestDiff)
       if (!controller.signal.aborted)
-        setMessage(
-          copied ? 'Diff copied.' : 'Clipboard unavailable. Select the diff to copy it manually.',
-        )
+        setNotice({
+          kind: 'clipboard',
+          text: copied
+            ? 'Diff copied.'
+            : 'Clipboard unavailable. Select the diff to copy it manually.',
+        })
     } catch (error) {
       if (controller.signal.aborted) return
-      setMessage(error instanceof Error ? error.message : 'Could not verify the request diff.')
+      setNotice({
+        kind: 'verification',
+        text:
+          error instanceof Error
+            ? `Could not verify the request diff. ${error.message}`
+            : 'Could not verify the request diff.',
+      })
       onVerifyError(error)
     } finally {
       if (!controller.signal.aborted) {
@@ -73,6 +89,13 @@ export function DatadogRightsizingEvidence({
     }
   }
 
+  const status = notice && (
+    <p role="status" className="text-xs text-theme-text-secondary">
+      {notice.text}
+    </p>
+  )
+  if (!detail) return status ?? null
+  const { rightsizing } = detail
   return (
     <div className="mt-2 space-y-3">
       <p className="text-xs text-theme-text-secondary">
@@ -94,7 +117,7 @@ export function DatadogRightsizingEvidence({
             </pre>
             <button
               type="button"
-              className="btn-brand-outline btn-sm"
+              className="btn-brand-muted rounded-md px-3 py-1.5 text-xs font-medium"
               disabled={checking || refreshing}
               onClick={() => void copyDiff()}
             >
@@ -103,11 +126,7 @@ export function DatadogRightsizingEvidence({
           </Disclosure>
         </div>
       )}
-      {message && (
-        <p role="status" className="text-xs text-theme-text-secondary">
-          {message}
-        </p>
-      )}
+      {status}
     </div>
   )
 }

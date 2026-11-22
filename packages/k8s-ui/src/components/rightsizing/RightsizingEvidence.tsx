@@ -1,5 +1,6 @@
 import { ArrowRight, Loader2 } from 'lucide-react'
 import { Badge } from '../ui/Badge'
+import { groupRightsizingRows } from './results-model'
 import {
   explainRightsizingReasons,
   isDatadogRequestActionable,
@@ -15,20 +16,15 @@ export function RightsizingEvidence({
   data,
   compact = false,
 }: {
-  data: WorkloadRightsizingEvidence | DatadogSizingWorkload
+  data: (WorkloadRightsizingEvidence & { source: 'radar' }) | DatadogSizingWorkload
   compact?: boolean
 }) {
-  const datadog = 'actionableRequests' in data ? data : undefined
+  const datadog = data.source === 'datadog' ? data : undefined
   if (data.rows.length === 0 || (!data.sampleAvailable && !datadog)) {
     return <RightsizingEmptyState text={data.reason ?? 'No rightsizing evidence is available.'} />
   }
 
-  const byContainer = new Map<string, RightsizingRow[]>()
-  for (const row of data.rows) {
-    const rows = byContainer.get(row.container) ?? []
-    rows.push(row)
-    byContainer.set(row.container, rows)
-  }
+  const byContainer = groupRightsizingRows(data.rows)
 
   if (compact) {
     return (
@@ -263,7 +259,12 @@ export function getRightsizingExplanation(row: RightsizingRow): string | undefin
     row.liveInventoryUnavailable && row.resource === 'memory'
       ? "Radar could not read this workload's pods, so it could not check them for out-of-memory restarts."
       : undefined
-  const qualified = (base: string) => (inventoryNote ? `${base} ${inventoryNote}` : base)
+  const throttleNote =
+    row.resource === 'cpu' && !row.throttleAvailable
+      ? 'CPU throttling metrics are unavailable; no throttling conclusion was drawn.'
+      : undefined
+  const qualified = (base?: string) =>
+    [base, inventoryNote, throttleNote].filter(Boolean).join(' ') || undefined
   if (row.fit === 'pod_level_request' && row.podLevelRequest && !row.queryError)
     return qualified(podLevelRequestExplanation(row, row.podLevelRequest))
   if (row.reductionLimited && row.calculatedRequest && row.recommendedRequest) {
@@ -276,11 +277,7 @@ export function getRightsizingExplanation(row: RightsizingRow): string | undefin
     ? `Partial result: ${row.queryError}.`
     : row.recommendationReason &&
       explainRightsizingReasons([row.recommendationReason], row.resource)
-  const throttleUnavailable = row.resource === 'cpu' && !row.throttleAvailable
-  if (!message && !throttleUnavailable) return inventoryNote
-  return qualified(
-    message ?? 'CPU throttling metrics are unavailable; no throttling conclusion was drawn.',
-  )
+  return qualified(message)
 }
 
 function podLevelRequestExplanation(row: RightsizingRow, podLevelRequest: string): string {
