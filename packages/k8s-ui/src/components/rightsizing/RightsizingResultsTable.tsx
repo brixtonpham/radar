@@ -2,7 +2,8 @@ import { useMemo, type ReactNode } from 'react'
 import type { RightsizingRow } from '../../types/rightsizing'
 import { Badge } from '../ui/Badge'
 import { Collapse, CollapseChevron } from '../ui/Collapse'
-import { podLevelOverUseNote } from './RightsizingEvidence'
+import { getRightsizingExplanation } from './RightsizingEvidence'
+import { explainRightsizingReasons } from '../../utils/rightsizing-reasons'
 import {
   getResourceRequestPresentation,
   type ResourceSignal,
@@ -84,6 +85,11 @@ function ScanResultRow({
 }) {
   return (
     <div>
+      {row.workloadReason && (
+        <p className="px-3.5 pt-2 text-xs text-theme-text-secondary">
+          {row.name} · {row.workloadReason}
+        </p>
+      )}
       <button
         type="button"
         onClick={onToggle}
@@ -169,6 +175,9 @@ function ImpactCell({ row }: { row: RightsizingResultRow }) {
       </div>
     )
   }
+  if (row.classification === 'need_data' && row.source === 'datadog') {
+    return <div className="text-xs text-theme-text-tertiary">Insufficient usage evidence</div>
+  }
   const changes = formatRequestChanges(row.impact)
   return (
     <div className="min-w-0 text-xs text-theme-text-secondary">
@@ -189,6 +198,8 @@ function ImpactCell({ row }: { row: RightsizingResultRow }) {
           {row.review?.cpu || row.review?.memory ? 'Manual review required' : 'No suggested change'}
         </div>
       )}
+      {changes.length > 0 && row.review?.cpu && <div>CPU request needs review</div>}
+      {changes.length > 0 && row.review?.memory && <div>Memory request needs review</div>}
     </div>
   )
 }
@@ -248,7 +259,9 @@ export function FitWhy({
       </div>
       <p className="mt-1 text-xs text-theme-text-secondary">
         {row.queryError
-          ? 'Metrics could not be queried, so usable history could not be determined. Retry the scan, or select fewer namespaces in the top bar.'
+          ? source === 'datadog'
+            ? 'Datadog could not return these measurements. Open the workload to retry.'
+            : 'Metrics could not be queried, so usable history could not be determined. Retry the scan, or select fewer namespaces in the top bar.'
           : `${observation}${history}`}
       </p>
       <EvidenceNote row={row} review={review} />
@@ -257,112 +270,36 @@ export function FitWhy({
 }
 
 function EvidenceNote({ row, review }: { row: RightsizingRow; review?: string }) {
-  const primary = review ? (
-    <p className="mt-1 text-xs text-theme-text-tertiary">{review}</p>
-  ) : (
-    primaryEvidenceNote(row)
-  )
-  // A denied pod read qualifies whichever reason applies rather than standing in
-  // for it: a row can both be unable to check its pods and have a limit conflict,
-  // and hiding either one behind the other loses something the reader needs.
-  const inventory =
-    row.liveInventoryUnavailable && row.resource === 'memory' ? (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        Radar could not read this workload&apos;s pods, so it could not check them for out-of-memory restarts.
-      </p>
-    ) : null
-  if (!primary && !inventory) return null
-  return (
-    <>
-      {primary}
-      {inventory}
-    </>
-  )
+  const guidance = review ?? requestChangeNote(row)
+  let message = guidance ?? getRightsizingExplanation(row)
+  if (guidance && row.liveInventoryUnavailable && row.resource === 'memory') {
+    message +=
+      " Radar could not read this workload's pods, so it could not check them for out-of-memory restarts."
+  }
+  return message ? <p className="mt-1 text-xs text-theme-text-tertiary">{message}</p> : null
 }
 
-function primaryEvidenceNote(row: RightsizingRow) {
-  if (row.fit === 'pod_level_request' && !row.queryError)
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        {podLevelOverUseNote(row) ??
-          "This pod sets a pod-level request in spec.resources, which the scheduler reserves instead of container requests. Radar shows this container's usage but doesn't size the pod-level request."}
-      </p>
-    )
-  if (row.hpaManaged)
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        The HPA uses this request when calculating scale, so Radar does not suggest changing it directly.
-      </p>
-    )
-  if (row.recommendationReason === 'oom_evidence')
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        A recent out-of-memory restart makes a lower memory request unsafe to suggest.
-      </p>
-    )
-  if (row.recommendationReason === 'hpa_evidence_unavailable')
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        Radar could not verify whether autoscaling depends on this request.
-      </p>
-    )
-  if (row.recommendationReason === 'oom_evidence_unavailable')
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        Radar could not verify restart history before suggesting a lower memory request.
-      </p>
-    )
-  if (row.recommendationReason === 'requests_exceed_pod_limit')
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        Together with the other containers&apos; requests and suggested increases, the calculated request
-        would take the pod above its pod-level limit. Decide how to split the limit, or raise it.
-      </p>
-    )
-  if (row.limitConflict)
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        The calculated request would exceed the current limit.
-      </p>
-    )
-  if (row.fit === 'insufficient_history' && !row.queryError)
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        Wait for more runtime history before changing this request.
-      </p>
-    )
-  const isReduction =
+function requestChangeNote(row: RightsizingRow): string | undefined {
+  if (row.queryError || row.fit === 'pod_level_request') return
+  if (row.hpaManaged) return explainRightsizingReasons(['hpa_managed'], row.resource)
+  if (row.limitConflict) {
+    return explainRightsizingReasons([row.recommendationReason ?? 'recommended_request_exceeds_limit'])
+  }
+  if (row.fit === 'insufficient_history') return 'Wait for more runtime history before changing this request.'
+  const isCpuReduction =
+    row.resource === 'cpu' &&
     row.recommendedRequestValue != null &&
     row.currentRequestValue != null &&
     row.recommendedRequestValue < row.currentRequestValue
-  if (row.resource === 'cpu' && isReduction && (row.throttleRatio ?? 0) >= 0.1)
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        CPU limit throttling was observed. Review the limit and burst behavior before reducing this request.
-      </p>
-    )
-  if (row.resource === 'cpu' && isReduction && row.bursty)
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        CPU usage was bursty during the measured period. Review the peak before reducing this request.
-      </p>
-    )
-  if (row.reductionLimited && row.calculatedRequest && row.recommendedRequest) {
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        Demand-based target: {row.calculatedRequest}. Radar suggests {row.recommendedRequest} as a
-        conservative next step; observe another full window before reducing further.
-        {row.bursty && row.peak ? ` CPU P99 reached ${row.peak.formatted}.` : ''}
-      </p>
-    )
+  if (isCpuReduction && (row.throttleRatio ?? 0) >= 0.1) {
+    return 'CPU limit throttling was observed. Review the limit and burst behavior before reducing this request.'
   }
-  if (row.recommendedRequest)
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        The target includes 15% headroom, a practical minimum, and scale-aware rounding.
-      </p>
-    )
-  return null
+  if (isCpuReduction && row.bursty) {
+    return 'CPU usage was bursty during the measured period. Review the peak before reducing this request.'
+  }
+  if (!row.recommendationReason && !row.reductionLimited && row.recommendedRequest) {
+    return 'The target includes 15% headroom, a practical minimum, and scale-aware rounding.'
+  }
 }
 
 function formatRequestChanges({

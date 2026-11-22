@@ -28,6 +28,7 @@ export interface RightsizingResultRow extends Omit<ScanWorkload, 'rows'> {
   memory?: RightsizingRow
   classification: ScanClass
   impact: RightsizingImpact
+  workloadReason?: string
   workloadImpact?: Pick<RightsizingImpact, 'cpuChange' | 'memoryChange'>
   review?: Partial<Record<RightsizingRow['resource'], string>>
 }
@@ -121,6 +122,16 @@ export function calculateImpact(
   return { replicas: count, cpuChange, memoryChange }
 }
 
+export function groupRightsizingRows(measurements: RightsizingRow[]): Map<string, RightsizingRow[]> {
+  const byContainer = new Map<string, RightsizingRow[]>()
+  for (const row of measurements) {
+    const rows = byContainer.get(row.container) ?? []
+    rows.push(row)
+    byContainer.set(row.container, rows)
+  }
+  return byContainer
+}
+
 interface Cluster {
   id: string
   name: string
@@ -137,13 +148,7 @@ export function workloadResultRows(
   cluster?: Cluster,
   workloadImpact?: RightsizingResultRow['workloadImpact'],
 ): RightsizingResultRow[] {
-  const byContainer = new Map<string, RightsizingRow[]>()
-  for (const row of workload.rows) {
-    const rows = byContainer.get(row.container) ?? []
-    rows.push(row)
-    byContainer.set(row.container, rows)
-  }
-
+  const byContainer = groupRightsizingRows(workload.rows)
   const { kind, namespace, name, replicas, scaledToZero } = workload
   return [...byContainer].map(([container, rows], index) => {
     const id = [cluster?.id, kind, namespace, name, container].filter(Boolean).join('/')
@@ -182,6 +187,7 @@ export function workloadResultRows(
         classification,
         impact,
         review,
+        workloadReason: index === 0 ? workload.reason : undefined,
         workloadImpact: byContainer.size > 1 && index === 0 ? workloadImpact : undefined,
       }
     }

@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { DatadogSizingWorkload, RightsizingRow } from '../../types/rightsizing'
-import { RightsizingResultsTable } from './RightsizingResultsTable'
+import { FitWhy, RightsizingResultsTable } from './RightsizingResultsTable'
 import { workloadResultRows } from './results-model'
 
 const cpu: RightsizingRow = {
@@ -89,6 +89,7 @@ describe('operator rightsizing results across clusters', () => {
       />,
     )
     expect(html).toContain('Review before changing')
+    expect(html).toContain('CPU request needs review')
     expect(html).toContain('Guaranteed QoS')
     expect(html).toContain('1512 of 2016 expected 5-minute samples')
     expect(html).toContain('64Mi → 128Mi')
@@ -96,6 +97,46 @@ describe('operator rightsizing results across clusters', () => {
     expect(html.match(/Whole workload/g)).toHaveLength(1)
     expect(html).not.toContain('200m')
     expect(html).not.toContain('Reduce request')
+  })
+
+  it('keeps the vendor read error and retry instructions scoped to the host', () => {
+    const row = { ...cpu, queryError: 'usage query failed' }
+    const cloud = renderToStaticMarkup(<FitWhy label="CPU" row={row} source="datadog" />)
+    expect(cloud).toContain('Open the workload to retry')
+    expect(cloud).not.toContain('top bar')
+    const local = renderToStaticMarkup(<FitWhy label="CPU" row={row} />)
+    expect(local).toContain('select fewer namespaces in the top bar')
+  })
+
+  it('shows the workload measurement gap once even when containers have rows', () => {
+    const missing: RightsizingRow = {
+      ...cpu,
+      fit: 'insufficient_history',
+      sampleCount: 0,
+      coverage: 0,
+      recommendedRequest: undefined,
+      recommendedRequestValue: undefined,
+    }
+    const rows = workloadResultRows(
+      {
+        ...workload,
+        sampleAvailable: false,
+        reason: 'No complete five-minute measurements for the current Pods and containers.',
+        rows: [missing, { ...missing, container: 'proxy' }],
+      },
+      { id: 'one', name: 'East' },
+    )
+    const html = renderToStaticMarkup(
+      <RightsizingResultsTable
+        rows={rows}
+        openRowId={null}
+        onOpenRowChange={() => {}}
+        renderWorkloadLink={() => null}
+      />,
+    )
+    expect(html.match(/No complete five-minute measurements/g)).toHaveLength(1)
+    expect(html).toContain('Insufficient usage evidence')
+    expect(html).not.toContain('No suggested change')
   })
 
   it('keeps missing data separate from an evaluated request within the fit range', () => {
