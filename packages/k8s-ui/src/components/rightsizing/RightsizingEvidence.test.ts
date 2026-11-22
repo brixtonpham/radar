@@ -53,7 +53,7 @@ describe('rightsizing presentation', () => {
     ).toContain('OOM evidence')
     expect(
       getRightsizingExplanation(row({ recommendationReason: 'hpa_evidence_unavailable' })),
-    ).toContain('could not verify HPA')
+    ).toContain('Check permission to list HorizontalPodAutoscalers')
     expect(
       getRightsizingExplanation(
         row({
@@ -98,6 +98,15 @@ describe('rightsizing presentation', () => {
 })
 
 describe('live pod inventory', () => {
+  it('keeps the missing OOM check alongside a manual staged reduction', () => {
+    const note = getRightsizingExplanation(row({
+      resource: 'memory', fit: 'oversized', liveInventoryUnavailable: true, reductionLimited: true,
+      calculatedRequest: '128Mi', recommendedRequest: '256Mi',
+    }), true)
+    expect(note).toContain('Review the staged change')
+    expect(note).toContain('could not check them for out-of-memory restarts')
+  })
+
   it('qualifies a memory row when the pod list could not be read', () => {
     const explanation = getRightsizingExplanation(
       row({ resource: 'memory', liveInventoryUnavailable: true }),

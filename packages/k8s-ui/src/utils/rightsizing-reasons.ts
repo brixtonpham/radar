@@ -5,7 +5,7 @@ const reasonText: Record<string, string> = {
   insufficient_history: 'At least six hours of samples are required before suggesting a request.',
   hpa_managed: 'This request affects the horizontal autoscaler.',
   hpa_evidence_unavailable:
-    'Radar could not verify HPA ownership. Check autoscaling before changing this request.',
+    'Radar could not verify HPA ownership. Check permission to list HorizontalPodAutoscalers in this namespace.',
   oom_evidence: 'A lower memory request is withheld because OOM evidence exists.',
   oom_evidence_unavailable:
     'Radar could not verify recent OOM history, so it withheld a lower memory request.',

@@ -58,7 +58,9 @@ export function DatadogRightsizingEvidence({
         if (fresh.configured)
           setNotice({
             kind: 'verification',
-            text: 'The recommendation changed. Review the refreshed diff before copying.',
+            text: fresh.manifestDiff
+              ? 'The recommendation changed. Review the refreshed diff before copying.'
+              : 'The request diff is no longer available.',
           })
         return
       }

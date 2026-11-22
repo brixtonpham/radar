@@ -171,13 +171,7 @@ function FitCard({
           value={`${row.sampleCount} of ${row.expectedSamples}`}
         />
       </div>
-      {manualReview && row.reductionLimited && row.calculatedRequest ? (
-        <p className="mt-3 text-xs text-theme-text-tertiary">
-          Demand-based target: {row.calculatedRequest}. Review the staged change before editing.
-        </p>
-      ) : (
-        <FitExplanation row={row} />
-      )}
+      <FitExplanation row={row} manualReview={manualReview} />
       {!!additionalReasons?.length && (
         <p className="mt-1 text-xs text-theme-text-secondary">
           {explainRightsizingReasons(additionalReasons, row.resource)}
@@ -245,13 +239,13 @@ export function getRightsizingPresentation(fit: RightsizingFit, queryError?: str
   return { label: labels[fit] ?? fit, severity: severities[fit] ?? ('neutral' as const) }
 }
 
-function FitExplanation({ row }: { row: RightsizingRow }) {
-  const message = getRightsizingExplanation(row)
+function FitExplanation({ row, manualReview }: { row: RightsizingRow; manualReview?: boolean }) {
+  const message = getRightsizingExplanation(row, manualReview)
   if (!message) return null
   return <p className="mt-3 text-xs text-theme-text-tertiary">{message}</p>
 }
 
-export function getRightsizingExplanation(row: RightsizingRow): string | undefined {
+export function getRightsizingExplanation(row: RightsizingRow, manualReview = false): string | undefined {
   // A denied pod read leaves currentPodOOM unknown rather than false, so it
   // qualifies whatever else is said instead of replacing it — including a
   // staged reduction, which is exactly where an unchecked pod matters most.
@@ -268,6 +262,7 @@ export function getRightsizingExplanation(row: RightsizingRow): string | undefin
   if (row.fit === 'pod_level_request' && row.podLevelRequest && !row.queryError)
     return qualified(podLevelRequestExplanation(row, row.podLevelRequest))
   if (row.reductionLimited && row.calculatedRequest && row.recommendedRequest) {
+    if (manualReview) return qualified(`Demand-based target: ${row.calculatedRequest}. Review the staged change before editing.`)
     const burstNote = row.bursty && row.peak ? ` CPU P99 reached ${row.peak.formatted}.` : ''
     return qualified(
       `Demand-based target: ${row.calculatedRequest}. Radar suggests ${row.recommendedRequest} as a conservative next step; observe another full window before reducing further.${burstNote}`,

@@ -183,3 +183,14 @@ it('clears the clipboard success message when a background refresh replaces the 
   await vi.waitFor(() => expect(host.textContent).toContain('450m'))
   expect(host.textContent).not.toContain('Diff copied.')
 })
+
+it('explains when the verified workload no longer has a diff to copy', async () => {
+  state.fetch.mockResolvedValueOnce(detail).mockResolvedValueOnce({ ...detail, manifestDiff: undefined })
+  await render()
+  await vi.waitFor(() => expect(host.textContent).toContain('Review request diff'))
+  await clickCopy()
+  await vi.waitFor(() => expect(host.textContent).not.toContain('Review request diff'))
+  expect(host.textContent).toContain('The request diff is no longer available.')
+  expect(host.textContent).not.toContain('Review the refreshed diff')
+  expect(copyText).not.toHaveBeenCalled()
+})

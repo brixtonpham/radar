@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import type { RightsizingRow } from '../../types/rightsizing'
 import { Badge } from '../ui/Badge'
 import { Collapse, CollapseChevron } from '../ui/Collapse'
@@ -27,16 +27,6 @@ export function RightsizingResultsTable<T extends RightsizingResultRow>({
   onOpenRowChange: (id: string | null) => void
   renderWorkloadLink: (row: T) => ReactNode
 }) {
-  const duplicateClusterNames = useMemo(() => {
-    const ids = new Map<string, string>()
-    const duplicates = new Set<string>()
-    for (const { clusterName, clusterId } of rows) {
-      if (!clusterName || !clusterId) continue
-      if (ids.has(clusterName) && ids.get(clusterName) !== clusterId) duplicates.add(clusterName)
-      ids.set(clusterName, clusterId)
-    }
-    return duplicates
-  }, [rows])
   return (
     <div className="overflow-x-auto">
       <div className="min-w-[955px]">
@@ -55,11 +45,6 @@ export function RightsizingResultsTable<T extends RightsizingResultRow>({
               key={row.id}
               row={row}
               open={openRowId === row.id}
-              clusterLabel={
-                row.clusterName && duplicateClusterNames.has(row.clusterName)
-                  ? `${row.clusterName} (${row.clusterId})`
-                  : row.clusterName
-              }
               onToggle={() => onOpenRowChange(openRowId === row.id ? null : row.id)}
               workloadLink={openRowId === row.id && renderWorkloadLink(row)}
             />
@@ -75,12 +60,10 @@ function ScanResultRow({
   open,
   onToggle,
   workloadLink,
-  clusterLabel,
 }: {
   row: RightsizingResultRow
   open: boolean
   onToggle: () => void
-  clusterLabel?: string
   workloadLink: ReactNode
 }) {
   return (
@@ -106,10 +89,10 @@ function ScanResultRow({
           <div
             className="mt-1 truncate text-xs text-theme-text-tertiary"
             title={
-              row.clusterId && `${row.clusterName} (${row.clusterId}) / ${row.namespace} / ${row.container}`
+              row.clusterId && `${row.clusterId} / ${row.namespace} / ${row.container}`
             }
           >
-            {clusterLabel && `${clusterLabel} · `}
+            {row.clusterName && `${row.clusterName} · `}
             {row.namespace} · {row.container}
           </div>
         </div>
@@ -270,6 +253,7 @@ export function FitWhy({
 }
 
 function EvidenceNote({ row, review }: { row: RightsizingRow; review?: string }) {
+  if (row.queryError) return null
   const guidance = review ?? requestChangeNote(row)
   let message = guidance ?? getRightsizingExplanation(row)
   if (guidance && row.liveInventoryUnavailable && row.resource === 'memory') {
@@ -280,7 +264,7 @@ function EvidenceNote({ row, review }: { row: RightsizingRow; review?: string })
 }
 
 function requestChangeNote(row: RightsizingRow): string | undefined {
-  if (row.queryError || row.fit === 'pod_level_request') return
+  if (row.fit === 'pod_level_request') return
   if (row.hpaManaged) return explainRightsizingReasons(['hpa_managed'], row.resource)
   if (row.limitConflict) {
     return explainRightsizingReasons([row.recommendationReason ?? 'recommended_request_exceeds_limit'])

@@ -37,8 +37,8 @@ const workload: DatadogSizingWorkload = {
 
 describe('operator rightsizing results across clusters', () => {
   it('keeps cluster identity in the list, row selection and workload link', () => {
-    const a = workloadResultRows(workload, { id: 'a', name: 'East' })
-    const b = workloadResultRows(workload, { id: 'b', name: 'East' })
+    const a = workloadResultRows(workload, { id: 'a', name: 'East (a)' })
+    const b = workloadResultRows(workload, { id: 'b', name: 'East (b)' })
     expect(a[0].id).not.toBe(b[0].id)
     const html = renderToStaticMarkup(
       <RightsizingResultsTable
@@ -104,8 +104,10 @@ describe('operator rightsizing results across clusters', () => {
     const cloud = renderToStaticMarkup(<FitWhy label="CPU" row={row} source="datadog" />)
     expect(cloud).toContain('Open the workload to retry')
     expect(cloud).not.toContain('top bar')
+    expect(cloud).not.toContain('Partial result:')
     const local = renderToStaticMarkup(<FitWhy label="CPU" row={row} />)
     expect(local).toContain('select fewer namespaces in the top bar')
+    expect(local).not.toContain('Partial result:')
   })
 
   it('shows the workload measurement gap once even when containers have rows', () => {
