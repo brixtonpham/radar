@@ -17,6 +17,7 @@ import (
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -243,5 +244,20 @@ func TestRightsizingScopeDaemonSetRevisionWithoutPodLabels(t *testing.T) {
 	pods, err := verifiedSizingPods(t.Context(), fake.NewSimpleClientset(revision, pod), u, s, tmpl, sel)
 	if err != nil || len(pods) != 1 {
 		t.Fatalf("current DaemonSet: %v, %v", pods, err)
+	}
+}
+
+func TestSizingInjectedSidecarWithSharedLimit(t *testing.T) {
+	container := corev1.Container{Name: "api"}
+	template := corev1.PodSpec{Containers: []corev1.Container{container}, Resources: &corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}}}
+	actual := corev1.Pod{Spec: *template.DeepCopy()}
+	actual.Spec.Containers = append(actual.Spec.Containers, corev1.Container{Name: "proxy"})
+	if sizingPodMatches(&actual, template) {
+		t.Fatal("injected container can change a shared Pod limit budget")
+	}
+	template.Resources = nil
+	actual.Spec.Resources = nil
+	if !sizingPodMatches(&actual, template) {
+		t.Fatal("injected container unnecessarily blocked per-container sizing")
 	}
 }

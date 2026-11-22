@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/utils/ptr"
 )
 
 func (s *Server) sizingCaller(w http.ResponseWriter, r *http.Request) bool {
@@ -372,9 +373,14 @@ func sizingPodMatches(p *corev1.Pod, spec corev1.PodSpec) bool {
 		return false
 	}
 	match := func(desired, actual []corev1.Container) bool {
+		// With a shared Pod limit, admission-injected containers can use the
+		// budget the sizing policy would otherwise assign to a template container.
+		if spec.Resources != nil && len(spec.Resources.Limits) > 0 && len(actual) != len(desired) {
+			return false
+		}
 		for _, c := range desired {
 			if !slices.ContainsFunc(actual, func(a corev1.Container) bool {
-				return c.Name == a.Name && equality.Semantic.DeepEqual(sizingResources(&a.Resources), sizingResources(&c.Resources))
+				return c.Name == a.Name && ptr.Equal(c.RestartPolicy, a.RestartPolicy) && equality.Semantic.DeepEqual(sizingResources(&a.Resources), sizingResources(&c.Resources))
 			}) {
 				return false
 			}
