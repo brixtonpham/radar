@@ -17,9 +17,8 @@ import {
   useClusterInfo,
   usePrometheusStatus,
   useRightsizingScan,
-  type RightsizingRow,
 } from '../../api/client'
-import { podLevelOverUseNote, RIGHTSIZING_DOCS_URL } from '../resource/RightsizingStrip'
+import { RIGHTSIZING_DOCS_URL } from '../resource/RightsizingStrip'
 import { buildWorkloadPath } from '../../utils/navigation'
 import { CostViewTabs } from '../cost/CostViewTabs'
 import {
@@ -29,15 +28,10 @@ import {
   type RightsizingScanRow,
   type ScanClass,
 } from './model'
-import {
-  getResourceRequestPresentation,
-  RIGHTSIZING_ACTION_SEVERITY,
-  type ResourceSignal,
-  type RightsizingActionTone,
-} from './presentation'
+import { RIGHTSIZING_ACTION_SEVERITY } from '@skyhook-io/k8s-ui/components/rightsizing/presentation'
+import { RightsizingResultsTable } from '@skyhook-io/k8s-ui/components/rightsizing/RightsizingResultsTable'
 import { useNavCustomization } from '../../context/NavCustomization'
 import { previousSettingsNote, usePreviousIntegrationSettings } from '../../hooks/usePreviousIntegrationSettings'
-import { clsx } from 'clsx'
 
 export const RIGHTSIZING_SCAN_DESCRIPTION =
   'Find CPU and memory requests to increase, reduce, or review. Radar never changes them.'
@@ -397,36 +391,28 @@ export function RightsizingScanView({ namespaces }: RightsizingScanViewProps) {
                   />
                 ) : (
                   <div>
-                    <div className="grid grid-cols-[minmax(230px,1.15fr)_minmax(190px,1fr)_minmax(200px,1fr)_minmax(220px,.9fr)_28px] gap-3 border-b border-theme-border px-3.5 py-2 text-[11px] font-medium uppercase tracking-wide text-theme-text-tertiary">
-                      <span>Workload / container</span>
-                      <span>CPU request</span>
-                      <span>Memory request</span>
-                      <span>Total request change</span>
-                      <span />
-                    </div>
-                    <div className="table-divide-subtle">
-                      {visibleRows.map((row) => (
-                        <ScanResultRow
-                          key={row.id}
-                          row={row}
-                          open={openRow === row.id}
-                          onToggle={() => setOpenRow(openRow === row.id ? null : row.id)}
-                          onOpen={() => openWorkload(row)}
-                        />
-                      ))}
-                      {visibleRows.length < filteredRows.length && (
-                        <div className="flex justify-center border-t border-theme-border px-4 py-3">
-                          <button
-                            type="button"
-                            onClick={() => setVisibleLimit((value) => value + ROW_PAGE_SIZE)}
-                            className="text-xs font-medium text-accent-text hover:underline"
-                          >
-                            Show {Math.min(ROW_PAGE_SIZE, filteredRows.length - visibleRows.length)}{' '}
-                            more
-                          </button>
-                        </div>
+                    <RightsizingResultsTable
+                      rows={visibleRows}
+                      openRowId={openRow}
+                      onOpenRowChange={setOpenRow}
+                      renderWorkloadLink={row => (
+                        <button type="button" onClick={() => openWorkload(row)} className="self-start text-xs font-medium text-accent-text hover:underline">
+                          Open workload
+                        </button>
                       )}
-                    </div>
+                    />
+                    {visibleRows.length < filteredRows.length && (
+                      <div className="flex justify-center border-t border-theme-border px-4 py-3">
+                        <button
+                          type="button"
+                          onClick={() => setVisibleLimit((value) => value + ROW_PAGE_SIZE)}
+                          className="text-xs font-medium text-accent-text hover:underline"
+                        >
+                          Show {Math.min(ROW_PAGE_SIZE, filteredRows.length - visibleRows.length)}{' '}
+                          more
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </section>
@@ -780,277 +766,6 @@ function ScanFilters(props: {
   )
 }
 
-function ScanResultRow({
-  row,
-  open,
-  onToggle,
-  onOpen,
-}: {
-  row: RightsizingScanRow
-  open: boolean
-  onToggle: () => void
-  onOpen: () => void
-}) {
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        className={clsx('grid w-full grid-cols-[minmax(230px,1.15fr)_minmax(190px,1fr)_minmax(200px,1fr)_minmax(220px,.9fr)_28px] items-center gap-3 text-left hover:bg-theme-hover/50', 'px-3.5 py-2.5' /* TABLE_DENSITY.cellClass in k8s-ui */)}
-      >
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <Badge kind={row.kind} size="sm">
-              {row.kind}
-            </Badge>
-            <span className="truncate text-sm font-medium text-theme-text-primary">{row.name}</span>
-          </div>
-          <div className="mt-1 truncate text-xs text-theme-text-tertiary">
-            {row.namespace} · {row.container}
-          </div>
-        </div>
-        <ResourceRequestCell row={row.cpu} scaledToZero={row.scaledToZero} />
-        <ResourceRequestCell row={row.memory} scaledToZero={row.scaledToZero} />
-        <ImpactCell row={row} />
-        <CollapseChevron open={open} className="h-4 w-4" />
-      </button>
-      <Collapse open={open} mountLazily>
-        <div className="grid gap-4 border-t border-theme-border bg-theme-base/40 px-4 py-3 md:grid-cols-[1fr_1fr_auto]">
-          <FitWhy label="CPU" row={row.cpu} />
-          <FitWhy label="Memory" row={row.memory} />
-          <button
-            type="button"
-            onClick={onOpen}
-            className="self-start text-xs font-medium text-accent-text hover:underline"
-          >
-            Open workload
-          </button>
-        </div>
-      </Collapse>
-    </div>
-  )
-}
-
-function ResourceRequestCell({
-  row,
-  scaledToZero,
-}: {
-  row?: RightsizingRow
-  scaledToZero: boolean
-}) {
-  const presentation = getResourceRequestPresentation(row, scaledToZero)
-  return (
-    <div className="min-w-0 text-xs">
-      <div className="truncate font-medium tabular-nums text-theme-text-primary">
-        {presentation.primary}
-      </div>
-      <div className={`mt-0.5 ${requestToneClass(presentation.tone)}`}>
-        {presentation.secondary}
-      </div>
-      {presentation.signals.length > 0 && (
-        <div className="mt-1 flex flex-wrap gap-1">
-          {presentation.signals.map((signal) => (
-            <SignalBadge key={signal} signal={signal} />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function requestToneClass(tone: RightsizingActionTone): string {
-  if (tone === 'reduction') return 'text-accent-text'
-  if (tone === 'increase') return 'text-warning-text'
-  return 'text-theme-text-tertiary'
-}
-
-function ImpactCell({ row }: { row: RightsizingScanRow }) {
-  if (row.classification === 'in_range') {
-    return <div className="text-xs text-theme-text-tertiary">Below action threshold</div>
-  }
-  const changes: string[] = []
-  if (row.impact.cpuChange !== 0) changes.push(formatCPUChange(row.impact.cpuChange))
-  if (row.impact.memoryChange !== 0) changes.push(formatMemoryChange(row.impact.memoryChange))
-  return (
-    <div className="min-w-0 text-xs text-theme-text-secondary">
-      <div>{row.replicas === 1 ? '1 replica' : `${row.replicas} replicas`}</div>
-      {row.scaledToZero ? (
-        <div className="mt-0.5 text-theme-text-tertiary">No current capacity impact</div>
-      ) : changes.length > 0 ? (
-        changes.map((change) => (
-          <div key={change} className="mt-0.5 tabular-nums text-theme-text-tertiary">
-            {change}
-          </div>
-        ))
-      ) : (
-        <div className="mt-0.5 text-theme-text-tertiary">No suggested change</div>
-      )}
-    </div>
-  )
-}
-
-function SignalBadge({ signal }: { signal: ResourceSignal }) {
-  return (
-    <Badge
-      severity={
-        signal === 'oom' || signal === 'query_error'
-          ? 'error'
-          : signal === 'throttling'
-            ? 'warning'
-            : 'neutral'
-      }
-      size="sm"
-    >
-      {signalLabel(signal)}
-    </Badge>
-  )
-}
-
-export function FitWhy({ label, row }: { label: string; row?: RightsizingRow }) {
-  if (!row)
-    return (
-      <div>
-        <div className="text-[11px] font-medium uppercase tracking-wide text-theme-text-tertiary">
-          {label}
-        </div>
-        <p className="mt-1 text-xs text-theme-text-secondary">No result returned.</p>
-      </div>
-    )
-  const history =
-    row.coverage >= 0.95
-      ? 'Full 7-day history.'
-      : `${Math.max(row.coverage * 7, 0).toFixed(1)} days of usable history.`
-  const observation = row.observed
-    ? row.observed.name === 'Max'
-      ? `${label} peaked at ${row.observed.formatted} during the measured period. `
-      : `${label} stayed below ${row.observed.formatted} for ${row.observed.name === 'P95' ? '95%' : '99%'} of the measured period. `
-    : ''
-  return (
-    <div>
-      <div className="text-[11px] font-medium uppercase tracking-wide text-theme-text-tertiary">
-        Why this {label.toLowerCase()} guidance
-      </div>
-      <p className="mt-1 text-xs text-theme-text-secondary">
-        {row.queryError
-          ? 'Metrics could not be queried, so usable history could not be determined. Retry the scan, or select fewer namespaces in the top bar.'
-          : `${observation}${history}`}
-      </p>
-      <EvidenceNote row={row} />
-    </div>
-  )
-}
-
-function EvidenceNote({ row }: { row: RightsizingRow }) {
-  const primary = primaryEvidenceNote(row)
-  // A denied pod read qualifies whichever reason applies rather than standing in
-  // for it: a row can both be unable to check its pods and have a limit conflict,
-  // and hiding either one behind the other loses something the reader needs.
-  const inventory =
-    row.liveInventoryUnavailable && row.resource === 'memory' ? (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        Radar could not read this workload&apos;s pods, so it could not check them for
-        out-of-memory restarts.
-      </p>
-    ) : null
-  if (!primary && !inventory) return null
-  return (
-    <>
-      {primary}
-      {inventory}
-    </>
-  )
-}
-
-function primaryEvidenceNote(row: RightsizingRow) {
-  if (row.fit === 'pod_level_request' && !row.queryError)
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        {podLevelOverUseNote(row) ??
-          "This pod sets a pod-level request in spec.resources, which the scheduler reserves instead of container requests. Radar shows this container's usage but doesn't size the pod-level request."}
-      </p>
-    )
-  if (row.hpaManaged)
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        The HPA uses this request when calculating scale, so Radar does not suggest changing it
-        directly.
-      </p>
-    )
-  if (row.recommendationReason === 'oom_evidence')
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        A recent out-of-memory restart makes a lower memory request unsafe to suggest.
-      </p>
-    )
-  if (row.recommendationReason === 'hpa_evidence_unavailable')
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        Radar could not verify whether autoscaling depends on this request.
-      </p>
-    )
-  if (row.recommendationReason === 'oom_evidence_unavailable')
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        Radar could not verify restart history before suggesting a lower memory request.
-      </p>
-    )
-  if (row.recommendationReason === 'requests_exceed_pod_limit')
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        Together with the other containers&apos; requests and suggested increases, the calculated
-        request would take the pod above its pod-level limit. Decide how to split the limit, or
-        raise it.
-      </p>
-    )
-  if (row.limitConflict)
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        The calculated request would exceed the current limit.
-      </p>
-    )
-  if (row.fit === 'insufficient_history' && !row.queryError)
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        Wait for more runtime history before changing this request.
-      </p>
-    )
-  const isReduction =
-    row.recommendedRequestValue != null &&
-    row.currentRequestValue != null &&
-    row.recommendedRequestValue < row.currentRequestValue
-  if (row.resource === 'cpu' && isReduction && (row.throttleRatio ?? 0) >= 0.1)
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        CPU limit throttling was observed. Review the limit and burst behavior before reducing this
-        request.
-      </p>
-    )
-  if (row.resource === 'cpu' && isReduction && row.bursty)
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        CPU usage was bursty during the measured period. Review the peak before reducing this
-        request.
-      </p>
-    )
-  if (row.reductionLimited && row.calculatedRequest && row.recommendedRequest) {
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        Demand-based target: {row.calculatedRequest}. Radar suggests {row.recommendedRequest} as a
-        conservative next step; observe another full window before reducing further.
-        {row.bursty && row.peak ? ` CPU P99 reached ${row.peak.formatted}.` : ''}
-      </p>
-    )
-  }
-  if (row.recommendedRequest)
-    return (
-      <p className="mt-1 text-xs text-theme-text-tertiary">
-        The target includes 15% headroom, a practical minimum, and scale-aware rounding.
-      </p>
-    )
-  return null
-}
-
 function CenteredState({
   loading,
   title,
@@ -1076,32 +791,6 @@ function CenteredState({
       </div>
     </div>
   )
-}
-
-function formatCPUChange(value: number): string {
-  const prefix = value > 0 ? '+' : '−'
-  const absolute = Math.abs(value)
-  return absolute >= 1
-    ? `${prefix}${absolute.toFixed(1)} CPU requested`
-    : `${prefix}${Math.round(absolute * 1000)}m CPU requested`
-}
-
-function formatMemoryChange(value: number): string {
-  const prefix = value > 0 ? '+' : '−'
-  const mib = Math.abs(value) / (1024 * 1024)
-  return mib >= 1024
-    ? `${prefix}${(mib / 1024).toFixed(1)}Gi memory requested`
-    : `${prefix}${Math.round(mib)}Mi memory requested`
-}
-
-function signalLabel(signal: ResourceSignal): string {
-  return {
-    hpa: 'HPA',
-    oom: 'OOM restart',
-    bursty: 'Bursty usage',
-    throttling: 'Throttling',
-    query_error: 'Metrics unavailable',
-  }[signal]
 }
 
 function errorMessage(error: unknown): string {

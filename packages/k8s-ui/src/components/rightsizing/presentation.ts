@@ -1,4 +1,4 @@
-import type { RightsizingRow } from '../../api/client'
+import type { RightsizingRow } from '../../types/rightsizing'
 
 export type ResourceSignal = 'hpa' | 'oom' | 'bursty' | 'throttling' | 'query_error'
 export type RightsizingActionTone = 'reduction' | 'increase' | 'review' | 'neutral'
@@ -19,6 +19,7 @@ export interface ResourceRequestPresentation {
 export function getResourceRequestPresentation(
   row?: RightsizingRow,
   scaledToZero = false,
+  review?: string,
 ): ResourceRequestPresentation {
   if (!row) return { primary: '—', secondary: 'No result returned', signals: [], tone: 'neutral' }
 
@@ -34,6 +35,7 @@ export function getResourceRequestPresentation(
 
   if (row.queryError)
     return { primary: currentOnly, secondary: 'Metrics query failed', signals, tone: 'neutral' }
+  if (review) return { primary: currentOnly, secondary: 'Review before changing', signals, tone: 'review' }
   if (row.fit === 'pod_level_request')
     return {
       primary: currentOnly,
@@ -68,9 +70,7 @@ export function getResourceRequestPresentation(
     row.recommendedRequestValue != null &&
     row.currentRequestValue != null &&
     row.recommendedRequestValue < row.currentRequestValue
-  const comparison = row.recommendedRequest
-    ? `${current} → ${row.recommendedRequest}`
-    : currentOnly
+  const comparison = row.recommendedRequest ? `${current} → ${row.recommendedRequest}` : currentOnly
 
   if (row.limitConflict)
     return {

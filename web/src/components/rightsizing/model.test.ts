@@ -1,8 +1,7 @@
+import { calculateImpact, classifyRows } from '@skyhook-io/k8s-ui/components/rightsizing/results-model'
 import { describe, expect, it } from 'vitest'
 import type { RightsizingScanResponse, RightsizingRow } from '../../api/client'
 import {
-  calculateImpact,
-  classifyRows,
   flattenScanResults,
   isActionableClass,
   scanClassCounts,
