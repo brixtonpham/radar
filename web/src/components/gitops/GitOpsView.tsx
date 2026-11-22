@@ -58,6 +58,7 @@ import {
   type SelectedResource,
 } from '@skyhook-io/k8s-ui'
 import { GitOpsActionError } from '../../api/httpErrors'
+import { GitOpsPermissionRowActions } from './GitOpsPermissionRowActions'
 import { useToast } from '../ui/Toast'
 import { useContextSwitchFlow } from '../useContextSwitchFlow'
 import { FluxOperatorCard } from './FluxOperatorCard'
@@ -76,6 +77,7 @@ import {
   useArgoRollback,
   useArgoSuspend,
   useArgoSync,
+  useGitOpsActionCapabilities,
   useArgoTerminate,
   useFluxReconcile,
   useFluxResume,
@@ -265,6 +267,9 @@ function GitOpsTableView({ namespaces, onClearNamespaces }: { namespaces: string
 
   const syncDialogRow = rowsQuery.data?.rows.find((row) => row.id === syncDialogRowId)
   const activeSyncDialog = useActiveSyncDialog(syncDialogRow ? syncSelection : null)
+  const { disabledReasons: syncDialogDisabledReasons } = useGitOpsActionCapabilities(
+    syncDialogRow?.kindName ?? '', syncDialogRow?.group, syncDialogRow?.namespace ?? '', syncDialogRow?.name ?? '', !!syncDialogRow,
+  )
   useEffect(() => {
     if (syncDialogRowId && !syncDialogRow) setSyncSelection(null)
   }, [syncDialogRowId, syncDialogRow])
@@ -377,6 +382,7 @@ function GitOpsTableView({ namespaces, onClearNamespaces }: { namespaces: string
           params.set('apiGroup', row.group)
           navigate({ pathname: gitOpsDetailPath(row.kindName, ns, row.name), search: params.toString() })
         }}
+        renderRowActions={(row, items) => <GitOpsPermissionRowActions row={row} items={items} />}
         onRowAction={handleRowAction}
         pendingRowActions={pendingActions}
         argoResumeUpgrade={argoResumeUpgrade}
@@ -387,6 +393,7 @@ function GitOpsTableView({ namespaces, onClearNamespaces }: { namespaces: string
       />
       <SyncOptionsDialog
         open={!!syncDialogRow}
+        disabledReason={syncDialogDisabledReasons.sync}
         appLabel={syncDialogRow ? `${syncDialogRow.namespace}/${syncDialogRow.name}` : ''}
         multiSource={isArgoMultiSource(syncDialogRow?.raw)}
         comparedRevision={syncDialogRow?.raw?.status?.sync?.revision}
@@ -398,7 +405,7 @@ function GitOpsTableView({ namespaces, onClearNamespaces }: { namespaces: string
         syncRawError={argoSync.error?.rawDetail}
         onCancel={() => setSyncSelection(null)}
         onConfirm={(opts) => {
-          if (!syncDialogRow) return
+          if (!syncDialogRow || syncDialogDisabledReasons.sync) return
           const { namespace, name } = syncDialogRow
           argoSync.mutate(
             {
@@ -513,6 +520,7 @@ function GitOpsDetailView({ namespaces, onOpenResource, onOpenSettings }: GitOps
   const [graphFullscreen, setGraphFullscreen] = useState(false)
   const [helmValuesOpen, setHelmValuesOpen] = useState(false)
 
+  const { permissions: actionPermissions, disabledReasons: actionDisabledReasons, permissionCheckUnavailable } = useGitOpsActionCapabilities(kind, effectiveGroup, namespace, name)
   const argoSync = useArgoSync()
   const remediationSync = useArgoSync({ reportErrors: false })
   const argoResourceValidation = useArgoResourceValidation()
@@ -662,6 +670,8 @@ function GitOpsDetailView({ namespaces, onOpenResource, onOpenSettings }: GitOps
     category: 'GitOps',
     scope: 'gitops',
     handler: () => {
+      const reason = actionDisabledReasons[isArgoApp ? 'sync' : 'reconcile']
+      if (reason) { showToast(reason, { type: 'info', id: `gitops-denied:${reason}` }); return }
       if (effectiveSuspended || terminating || operationInProgress) return
       if (isArgoApp) openArgoSyncDialog({ scope: 'application' })
       else if (isFlux) fluxReconcile.mutate({ kind, namespace, name })
@@ -676,6 +686,7 @@ function GitOpsDetailView({ namespaces, onOpenResource, onOpenSettings }: GitOps
     scope: 'gitops',
     handler: () => {
       if (!isArgoApp) return
+      if (actionDisabledReasons.refresh) { showToast(actionDisabledReasons.refresh, { type: 'info', id: `gitops-denied:${actionDisabledReasons.refresh}` }); return }
       setRefreshKind('normal')
       argoRefresh.mutate({ namespace, name, hard: false })
     },
@@ -689,6 +700,7 @@ function GitOpsDetailView({ namespaces, onOpenResource, onOpenSettings }: GitOps
     scope: 'gitops',
     handler: () => {
       if (!isArgoApp) return
+      if (actionDisabledReasons.refresh) { showToast(actionDisabledReasons.refresh, { type: 'info', id: `gitops-denied:${actionDisabledReasons.refresh}` }); return }
       setRefreshKind('hard')
       argoRefresh.mutate({ namespace, name, hard: true })
     },
@@ -701,6 +713,7 @@ function GitOpsDetailView({ namespaces, onOpenResource, onOpenSettings }: GitOps
     category: 'GitOps',
     scope: 'gitops',
     handler: () => {
+      if (actionDisabledReasons.terminate) { showToast(actionDisabledReasons.terminate, { type: 'info', id: `gitops-denied:${actionDisabledReasons.terminate}` }); return }
       if (isArgoApp && isRunning) argoTerminate.mutate({ namespace, name })
     },
     enabled: shortcutsEnabled && isArgoApp && isRunning,
@@ -851,6 +864,9 @@ function GitOpsDetailView({ namespaces, onOpenResource, onOpenSettings }: GitOps
       isArgoApp={isArgoApp}
       isFlux={isFlux}
       isFluxWorkload={isFluxWorkload}
+      actionDisabledReasons={actionDisabledReasons}
+      actionPermissions={actionPermissions}
+      permissionCheckUnavailable={permissionCheckUnavailable}
       argo={argoHandlers}
       flux={fluxHandlers}
       activeTab={appView}
@@ -896,6 +912,7 @@ function GitOpsDetailView({ namespaces, onOpenResource, onOpenSettings }: GitOps
             <GitOpsActivityInsightView
               insight={insightsQ.data}
               error={insightsQ.error as Error | null}
+              rollbackDisabledReason={actionDisabledReasons.rollback}
               onRollback={isArgoApp && !operationInProgress ? (item) => {
                 if (argoRollbackUpgrade || argoRollbackBlockedReason || parseArgoRollbackID(item.id) == null) return
                 setRollbackTarget(item)
@@ -919,7 +936,7 @@ function GitOpsDetailView({ namespaces, onOpenResource, onOpenSettings }: GitOps
                     ? 'Resume the Application before syncing a resource.'
                     : operationInProgress || argoSyncBusy
                       ? 'Wait for the current sync operation to finish.'
-                      : undefined
+                      : actionDisabledReasons.sync
               ) : undefined}
               focusKey={changesFocusKey}
               tree={tree}
@@ -980,6 +997,7 @@ function GitOpsDetailView({ namespaces, onOpenResource, onOpenSettings }: GitOps
             multiSource={isArgoMultiSource(resourceQ.data)}
             pinsComparedRevision={argoInheritanceSupport === 'supported' && argoComparedRevisionCurrent(resourceQ.data)}
             resource={syncDialogTarget?.scope === 'resource' ? syncDialogTarget.resource : undefined}
+            disabledReason={actionDisabledReasons.sync}
             comparedRevision={resourceQ.data?.status?.sync?.revision}
             applicationSyncOptions={appSyncOptions}
             pending={argoSync.isPending}
@@ -994,12 +1012,13 @@ function GitOpsDetailView({ namespaces, onOpenResource, onOpenSettings }: GitOps
             onCancel={closeArgoSyncDialog}
             onValidationReset={() => argoResourceValidation.reset()}
             onValidate={syncDialogTarget?.scope === 'resource' ? (opts) => {
+              if (actionDisabledReasons.validate) return
               argoSync.reset()
               setValidatedTargetKey(deployTargetKey)
               argoResourceValidation.mutate(buildArgoResourceSyncVars(namespace, name, syncDialogTarget.resource, opts, appSyncOptions))
             } : undefined}
             onConfirm={(opts) => {
-              if (!syncDialogTarget) return
+              if (!syncDialogTarget || actionDisabledReasons.sync) return
               if (argoResourceValidation.isError) argoResourceValidation.reset()
               const variables = syncDialogTarget.scope === 'resource'
                 ? buildArgoResourceSyncVars(namespace, name, syncDialogTarget.resource, opts, appSyncOptions)
@@ -1015,6 +1034,7 @@ function GitOpsDetailView({ namespaces, onOpenResource, onOpenSettings }: GitOps
             appLabel={`${namespace}/${name}`}
             revision={rollbackTarget?.revision || ''}
             historyId={rollbackTarget?.id}
+            disabledReason={actionDisabledReasons.rollback}
             source={rollbackTarget?.source}
             multiSourceWarning={rollbackTarget?.rollbackMultiSourceWarning}
             pending={argoRollback.isPending}
@@ -1026,6 +1046,7 @@ function GitOpsDetailView({ namespaces, onOpenResource, onOpenSettings }: GitOps
                 setRollbackTarget(null)
                 return
               }
+              if (actionDisabledReasons.rollback) return
               const id = parseArgoRollbackID(rollbackTarget?.id)
               if (id == null) {
                 showError('Rollback target became invalid', 'The history entry changed while the dialog was open. Reselect a target and try again.')
