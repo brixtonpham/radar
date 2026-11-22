@@ -1,7 +1,7 @@
 import type { DatadogSizingWorkload, RightsizingRow } from '../types/rightsizing'
 
 const reasonText: Record<string, string> = {
-  request_within_fit_range: 'The configured request is within 30% of the evidence-based target.',
+  request_within_fit_range: 'Keep the current request. Radar suggests a reduction only when the demand-based target is at least 30% below the current request and the rounded recommendation is lower.',
   insufficient_history: 'At least six hours of samples are required before suggesting a request.',
   hpa_managed: 'This request affects the horizontal autoscaler.',
   hpa_evidence_unavailable:

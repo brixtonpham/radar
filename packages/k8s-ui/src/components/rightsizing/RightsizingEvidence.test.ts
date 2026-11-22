@@ -84,6 +84,12 @@ describe('rightsizing presentation', () => {
     expect(explanation).toContain('CPU P99 reached 200m')
   })
 
+  it('explains the reduction threshold relative to the current request and accounts for rounding', () => {
+    const explanation = getRightsizingExplanation(row({ recommendationReason: 'request_within_fit_range' }))
+    expect(explanation).toContain('at least 30% below the current request')
+    expect(explanation).toContain('the rounded recommendation is lower')
+  })
+
   it('does not revive the misleading efficiency vocabulary', () => {
     const copy = [
       getRightsizingPresentation('balanced').label,
