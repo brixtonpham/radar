@@ -93,16 +93,14 @@ func (s *Server) handleWorkloadRightsizingScope(w http.ResponseWriter, r *http.R
 		s.writeError(w, 403, "Rightsizing requires permission to list Pods, plus ReplicaSets for Deployments or ControllerRevisions for DaemonSets")
 		return
 	}
-	if errors.Is(err, errSizingAdmission) {
-		s.writeErrorCode(w, 409, "pod_resources_changed", "Live Pod resources differ from the workload template. Check admission defaults, a VPA or in-place resizing")
-		return
-	}
-	if errors.Is(err, errSizingLimit) {
-		s.writeErrorCode(w, 422, "inventory_limit", "Rightsizing supports up to 512 matching Pods and 512 controller revisions per workload")
-		return
-	}
-	if errors.Is(err, errSizingRollout) {
-		s.writeErrorCode(w, 409, "rollout_in_progress", "Rightsizing requires ready replicas running the current workload template")
+	var guard *sizingGuardError
+	if errors.As(err, &guard) {
+		uid := s.sizingClusterIdentity(w, ctx, generation)
+		if uid != "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(guard.status)
+			s.writeJSON(w, map[string]string{"error": guard.message, "error_code": guard.code, "clusterUID": uid})
+		}
 		return
 	}
 	if err != nil {
@@ -140,16 +138,23 @@ func (s *Server) handleWorkloadRightsizingScope(w http.ResponseWriter, r *http.R
 	}
 	readSizingHPA(ctx, typed, &scope)
 	slices.SortFunc(scope.Pods, func(a, b rightsizing.Pod) int { return cmp.Compare(a.Name, b.Name) })
-	scope.ClusterUID, err = cloud.DiscoverClusterUID(ctx, k8s.GetClientInterface())
+	scope.ClusterUID = s.sizingClusterIdentity(w, ctx, generation)
+	if scope.ClusterUID != "" {
+		s.writeJSON(w, scope)
+	}
+}
+
+func (s *Server) sizingClusterIdentity(w http.ResponseWriter, ctx context.Context, generation uint64) string {
+	uid, err := cloud.DiscoverClusterUID(ctx, k8s.GetClientInterface())
 	if _, current := k8s.GetClientWithGeneration(); current != generation {
 		s.writeError(w, 409, "Kubernetes connection changed. Retry the request")
-		return
+		return ""
 	}
-	if err != nil || scope.ClusterUID == "" {
+	if err != nil || uid == "" {
 		s.writeError(w, 503, "Could not verify cluster identity")
-		return
+		return ""
 	}
-	s.writeJSON(w, scope)
+	return uid
 }
 
 func sizingTemplate(kind string, obj *unstructured.Unstructured) (rightsizing.Scope, corev1.PodTemplateSpec, labels.Selector, error) {
@@ -224,10 +229,17 @@ func sizingResources(r *corev1.ResourceRequirements) *corev1.ResourceRequirement
 	return &corev1.ResourceRequirements{Requests: project(r.Requests), Limits: project(r.Limits)}
 }
 
+type sizingGuardError struct {
+	status        int
+	code, message string
+}
+
+func (e *sizingGuardError) Error() string { return e.message }
+
 var (
-	errSizingRollout   = errors.New("cannot verify all replicas run the current template")
-	errSizingAdmission = errors.New("runtime container resources differ from template")
-	errSizingLimit     = errors.New("sizing inventory exceeds limit")
+	errSizingRollout   = &sizingGuardError{409, "rollout_in_progress", "Rightsizing requires ready replicas running the current workload template"}
+	errSizingAdmission = &sizingGuardError{409, "pod_resources_changed", "Live Pod resources differ from the workload template. Check admission defaults, a VPA or in-place resizing"}
+	errSizingLimit     = &sizingGuardError{422, "inventory_limit", "Rightsizing supports up to 512 candidate Pods and 512 controller revisions per lookup"}
 )
 
 // Status describes an earlier observation. Check the live Pods and revision identities too.
@@ -237,12 +249,6 @@ func verifiedSizingPods(ctx context.Context, client kubernetes.Interface, owner 
 	list, err := client.CoreV1().Pods(ns).List(ctx, opts)
 	if err != nil {
 		return nil, err
-	}
-	if list.Continue != "" || len(list.Items) > 512 {
-		return nil, errSizingLimit
-	}
-	if !sizingControllerReady(owner, scope.Kind, scope.Replicas) {
-		return nil, errSizingRollout
 	}
 	revisionLabel, revision := "", ""
 	setUIDs := map[types.UID]string{}
@@ -300,6 +306,12 @@ func verifiedSizingPods(ctx context.Context, client kubernetes.Interface, owner 
 			records = append(records, unstructured.Unstructured{Object: map[string]any{"metadata": m, "revision": r.Revision}})
 		}
 		revisionLabel, revision = appsv1.ControllerRevisionHashLabelKey, k8score.CurrentControllerRevisionPodHashes(records)[owner.GetUID()]
+	}
+	if list.Continue != "" || len(list.Items) > 512 {
+		return nil, errSizingLimit
+	}
+	if !sizingControllerReady(owner, scope.Kind, scope.Replicas) {
+		return nil, errSizingRollout
 	}
 	pods := make([]corev1.Pod, 0)
 	for i := range list.Items {
