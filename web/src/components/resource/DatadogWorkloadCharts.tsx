@@ -3,7 +3,8 @@ import { AreaChart, MetricsSummary, type TimeSeries } from '@skyhook-io/k8s-ui/c
 import { fetchJSON, usePrometheusStatus, useRadarFeature, type PrometheusTimeRange } from '../../api/client'
 import { getApiBase } from '../../api/config'
 import { TIME_RANGES, WORKLOAD_CATEGORIES } from './PrometheusCharts'
-import { ConnectedPrometheusRightsizingPanel } from './RightsizingStrip'
+import { useNavCustomization } from '../../context/NavCustomization'
+import { ConnectedPrometheusRightsizingPanel, RightsizingPanel } from './RightsizingStrip'
 import { DatadogRightsizingPanel } from './DatadogRightsizingPanel'
 import { RestartEventLane } from './RestartChart'
 
@@ -18,7 +19,7 @@ const datadogCategories = [
   { key: 'throttling', label: 'CPU throttled periods', color: 'text-warning-text', chartColor: 'var(--warning-text)', fillColor: 'color-mix(in srgb, var(--warning-text) 14%, transparent)' },
 ] as const
 
-export function useDatadogWorkloadCharts({ kind, namespace, name }: Workload, range: PrometheusTimeRange, embedded: boolean) {
+function useDatadogStatus(kind: string, namespace: string, embedded: boolean) {
   const enabled = embedded && !!namespace && ['Deployment', 'StatefulSet', 'DaemonSet'].includes(kind)
   const apiBase = getApiBase()
   const status = useQuery({
@@ -28,7 +29,20 @@ export function useDatadogWorkloadCharts({ kind, namespace, name }: Workload, ra
     retry: false,
     queryFn: ({ signal }) => fetchJSON<{ configured: boolean; rightsizing?: boolean; setup?: 'owner' | 'member' }>('/metrics/datadog/status', signal),
   })
-  const mapped = enabled && status.data?.configured === true
+  return { status, enabled, mapped: enabled && status.data?.configured === true }
+}
+
+export function WorkloadCostRightsizing(workload: Workload) {
+  const { embedded = false } = useNavCustomization()
+  const { status, mapped } = useDatadogStatus(workload.kind, workload.namespace, embedded)
+  if (status.isLoading) return <p role="status" className="p-3 text-sm text-theme-text-secondary">Checking rightsizing source…</p>
+  if (mapped && status.data?.rightsizing) return <DatadogRightsizingPanel key={[workload.kind, workload.namespace, workload.name].join('/')} {...workload} />
+  return <RightsizingPanel {...workload} />
+}
+
+export function useDatadogWorkloadCharts({ kind, namespace, name }: Workload, range: PrometheusTimeRange, embedded: boolean) {
+  const { status, enabled, mapped } = useDatadogStatus(kind, namespace, embedded)
+  const apiBase = getApiBase()
   const path = [kind, namespace, name].map(encodeURIComponent).join('/')
   const charts = useQuery<WorkloadCharts>({
     queryKey: ['datadog-workload-metrics', apiBase, path, range],

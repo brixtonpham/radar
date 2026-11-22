@@ -102,10 +102,9 @@ import {
 } from '../../api/client'
 import { TIME_RANGES, PrometheusCharts, isPrometheusSupported } from '../resource/PrometheusCharts'
 import { PrometheusChartsGrid } from '../resource/PrometheusChartsGrid'
-import { DatadogSetupHint, DatadogWorkloadCharts, useDatadogWorkloadCharts } from '../resource/DatadogWorkloadCharts'
+import { DatadogSetupHint, DatadogWorkloadCharts, useDatadogWorkloadCharts, WorkloadCostRightsizing } from '../resource/DatadogWorkloadCharts'
 import { useNavCustomization } from '../../context/NavCustomization'
 import { RestartEventLane } from '../resource/RestartChart'
-import { RightsizingPanel } from '../resource/RightsizingStrip'
 import { WorkloadCostTab } from '../cost/WorkloadCostTab'
 import { isOpenCostWorkloadKind } from '../cost/kinds'
 import { isRadarFeatureUnsupported } from '../../api/radarFeatures'
@@ -1362,7 +1361,7 @@ export function WorkloadView({
         )}
         renderCostTab={({ kind, namespace: ns, name: n }) => (
           <div className="space-y-4">
-            <RightsizingPanel kind={kind} namespace={ns} name={n} />
+            <WorkloadCostRightsizing kind={kind} namespace={ns} name={n} />
             <WorkloadCostTab kind={kind} namespace={ns} name={n} />
           </div>
         )}

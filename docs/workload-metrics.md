@@ -19,8 +19,8 @@ identity for each chart read.
 ### Datadog-backed rightsizing in Radar Hub
 
 After an organization owner enables rightsizing for a verified cluster, the
-workload’s Metrics tab can compare each container’s CPU and memory requests with
-up to seven days of Datadog usage. The chart time picker affects the usage charts
+workload’s Metrics and Cost tabs can compare each container’s CPU and memory requests with
+up to seven days of Datadog usage. Dollar allocations on the Cost tab still require a supported allocation provider. The chart time picker affects the usage charts
 only. Radar uses the hottest current replica in each complete five-minute bucket.
 The sizing policy, headroom and staged reductions are shared with Prometheus
 rightsizing. CPU needs both P95 and P99 evidence. Missing restart history can
