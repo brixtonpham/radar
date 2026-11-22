@@ -115,7 +115,7 @@ func (s *Server) handleWorkloadRightsizingScope(w http.ResponseWriter, r *http.R
 			s.writeError(w, 503, "Could not verify owned Pod identity")
 			return
 		}
-		pod := rightsizing.Pod{Name: p.Name, UID: string(p.UID), CreatedAt: p.CreationTimestamp.Time, RestartCounts: map[string]int32{}}
+		pod := rightsizing.Pod{QOSClass: p.Status.QOSClass, Name: p.Name, UID: string(p.UID), CreatedAt: p.CreationTimestamp.Time, RestartCounts: map[string]int32{}}
 		for _, c := range scope.PodSpec.Containers {
 			pod.Containers = append(pod.Containers, c.Name)
 		}
@@ -240,14 +240,16 @@ func (e *sizingGuardError) Error() string { return e.message }
 var (
 	errSizingRollout   = &sizingGuardError{409, "rollout_in_progress", "Rightsizing requires ready replicas running the current workload template"}
 	errSizingAdmission = &sizingGuardError{409, "pod_resources_changed", "Live Pod resources differ from the workload template. Check admission defaults, a VPA or in-place resizing"}
-	errSizingLimit     = &sizingGuardError{422, "inventory_limit", "Rightsizing supports up to 512 candidate Pods and 512 controller revisions per lookup"}
+	errSizingLimit     = &sizingGuardError{422, "inventory_limit", "Rightsizing supports 512 active candidate Pods or revisions per workload and a scan of 4,096 revisions per namespace"}
 )
 
 // Status describes an earlier observation. Check the live Pods and revision identities too.
 func verifiedSizingPods(ctx context.Context, client kubernetes.Interface, owner *unstructured.Unstructured, scope rightsizing.Scope, template corev1.PodTemplateSpec, selector labels.Selector) ([]corev1.Pod, error) {
 	opts := metav1.ListOptions{Limit: 513, LabelSelector: selector.String()}
+	podOpts := opts
+	podOpts.FieldSelector = "status.phase!=Failed,status.phase!=Succeeded"
 	ns := owner.GetNamespace()
-	list, err := client.CoreV1().Pods(ns).List(ctx, opts)
+	list, err := client.CoreV1().Pods(ns).List(ctx, podOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -282,31 +284,16 @@ func verifiedSizingPods(ctx context.Context, client kubernetes.Interface, owner 
 		revisionLabel = appsv1.ControllerRevisionHashLabelKey
 		revision, _, _ = unstructured.NestedString(owner.Object, "status", "updateRevision")
 		applied, _, _ := unstructured.NestedString(owner.Object, "status", "currentRevision")
-		if applied != revision {
+		strategy, _, _ := unstructured.NestedString(owner.Object, "spec", "updateStrategy", "type")
+		if strategy != string(appsv1.OnDeleteStatefulSetStrategyType) && applied != revision {
 			return nil, errSizingRollout
 		}
 	case "DaemonSet":
-		revisions, err := client.AppsV1().ControllerRevisions(ns).List(ctx, metav1.ListOptions{Limit: 513})
+		revisionLabel = appsv1.ControllerRevisionHashLabelKey
+		revision, err = sizingDaemonRevision(ctx, client, owner)
 		if err != nil {
 			return nil, err
 		}
-		if revisions.Continue != "" || len(revisions.Items) > 512 {
-			return nil, errSizingLimit
-		}
-		var records []unstructured.Unstructured
-		for i := range revisions.Items {
-			r := &revisions.Items[i]
-			if !sizingControllerRef(metav1.GetControllerOf(r), owner.GetUID(), scope.Kind, scope.Name) {
-				continue
-			}
-			// Hash resolution only needs metadata and revision, never the recorded Pod template.
-			m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&r.ObjectMeta)
-			if err != nil {
-				return nil, err
-			}
-			records = append(records, unstructured.Unstructured{Object: map[string]any{"metadata": m, "revision": r.Revision}})
-		}
-		revisionLabel, revision = appsv1.ControllerRevisionHashLabelKey, k8score.CurrentControllerRevisionPodHashes(records)[owner.GetUID()]
 	}
 	if list.Continue != "" || len(list.Items) > 512 {
 		return nil, errSizingLimit
@@ -344,6 +331,39 @@ func verifiedSizingPods(ctx context.Context, client kubernetes.Interface, owner 
 		return nil, errSizingRollout
 	}
 	return pods, nil
+}
+
+// A controller can retain revisions whose labels changed. Page through the
+// namespace as the caller and keep only identity metadata for this DaemonSet.
+func sizingDaemonRevision(ctx context.Context, client kubernetes.Interface, owner *unstructured.Unstructured) (string, error) {
+	const pageSize = 64
+	opts := metav1.ListOptions{Limit: pageSize}
+	var records []unstructured.Unstructured
+	for page := 0; page < 64; page++ {
+		revisions, err := client.AppsV1().ControllerRevisions(owner.GetNamespace()).List(ctx, opts)
+		if err != nil {
+			return "", err
+		}
+		for i := range revisions.Items {
+			r := &revisions.Items[i]
+			ref := metav1.GetControllerOf(r)
+			if !sizingControllerRef(ref, owner.GetUID(), "DaemonSet", owner.GetName()) {
+				continue
+			}
+			if len(records) >= 512 {
+				return "", errSizingLimit
+			}
+			records = append(records, unstructured.Unstructured{Object: map[string]any{
+				"metadata": map[string]any{"ownerReferences": []any{map[string]any{"kind": ref.Kind, "uid": string(ref.UID)}}, "labels": map[string]any{appsv1.ControllerRevisionHashLabelKey: r.Labels[appsv1.ControllerRevisionHashLabelKey]}},
+				"revision": r.Revision,
+			}})
+		}
+		opts.Continue = revisions.Continue
+		if opts.Continue == "" {
+			return k8score.CurrentControllerRevisionPodHashes(records)[owner.GetUID()], nil
+		}
+	}
+	return "", errSizingLimit
 }
 
 func sizingControllerRef(ref *metav1.OwnerReference, uid types.UID, kind, name string) bool {

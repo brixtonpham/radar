@@ -44,11 +44,12 @@ func (targets HPATargets) Controls(container, resource string) bool {
 }
 
 type Pod struct {
-	Name          string           `json:"name"`
-	UID           string           `json:"uid"`
-	CreatedAt     time.Time        `json:"createdAt"`
-	Containers    []string         `json:"containers"`
-	RestartCounts map[string]int32 `json:"restartCounts"`
+	QOSClass      corev1.PodQOSClass `json:"qosClass"`
+	Name          string             `json:"name"`
+	UID           string             `json:"uid"`
+	CreatedAt     time.Time          `json:"createdAt"`
+	Containers    []string           `json:"containers"`
+	RestartCounts map[string]int32   `json:"restartCounts"`
 }
 
 type ContainerEvidence struct {

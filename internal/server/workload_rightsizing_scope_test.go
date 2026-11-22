@@ -113,6 +113,10 @@ func TestSizingTemplateAndCurrentReplicaGuards(t *testing.T) {
 		change func(*appsv1.StatefulSet, *corev1.Pod)
 	}{
 		{"stable", func(*appsv1.StatefulSet, *corev1.Pod) {}},
+		{"on-delete fully replaced", func(sts *appsv1.StatefulSet, _ *corev1.Pod) {
+			sts.Spec.UpdateStrategy.Type = appsv1.OnDeleteStatefulSetStrategyType
+			sts.Status.CurrentRevision = "old"
+		}},
 		{"unobserved", func(sts *appsv1.StatefulSet, _ *corev1.Pod) { sts.Generation++ }},
 		{"partition", func(sts *appsv1.StatefulSet, _ *corev1.Pod) { sts.Status.CurrentRevision = "old" }},
 		{"partial", func(sts *appsv1.StatefulSet, _ *corev1.Pod) { sts.Status.UpdatedReplicas = 0 }},
@@ -160,7 +164,7 @@ func TestSizingTemplateAndCurrentReplicaGuards(t *testing.T) {
 			terminal.UID = "previous"
 			terminal.Status.Phase = corev1.PodFailed
 			pods, err := verifiedSizingPods(t.Context(), fake.NewSimpleClientset(p, terminal), u, scope, tmpl, sel)
-			if tc.name == "stable" || tc.name == "registry rewrite" {
+			if tc.name == "stable" || tc.name == "registry rewrite" || tc.name == "on-delete fully replaced" {
 				if err != nil || len(pods) != 1 {
 					t.Fatalf("got %v, %v", pods, err)
 				}
